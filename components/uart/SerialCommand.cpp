@@ -27,6 +27,8 @@
 #include "stdint.h"
 #include "driver/uart.h"
 
+#define TAG "SerialCommand"
+
 /**
  * Constructor makes sure some things are set.
  */
@@ -141,4 +143,14 @@ void SerialCommand::clearBuffer()
 char *SerialCommand::next()
 {
   return strtok_r(NULL, delim, &last);
+}
+
+/**
+ * Print the list of commands.
+ */
+
+void SerialCommand::printCommands() {
+    for (int i = 0; i < commandCount; i++) {
+        printf("%s\n",commandList[i].command);
+    }
 }

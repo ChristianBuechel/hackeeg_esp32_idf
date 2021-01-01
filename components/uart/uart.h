@@ -26,7 +26,7 @@ extern "C"
 #endif
 
 void uart_init();
-
+void uart_write(char *data, uint8_t len);
 #ifdef __cplusplus
 }
 #endif

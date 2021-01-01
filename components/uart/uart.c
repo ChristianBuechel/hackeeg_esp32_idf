@@ -5,10 +5,12 @@
  * Copyright (c) 2017 Chris Morgan <chmorgan@gmail.com>
  *
 */
-
+#include "esp_log.h"
+#include "inttypes.h"
 #include "uart.h"
 #include "driver/uart.h"
 
+#define TAG "uart"
 
 // static const char * TAG = "uart";
 
@@ -26,4 +28,20 @@ void uart_init()
 	uart_param_config(UART_NUM_0, &uart_config);
 	uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 	uart_driver_install(UART_NUM_0, uart_buffer_size, 0, 0, NULL, 0);
+}
+
+void uart_write(char *data, uint8_t len)
+{
+    int size;
+    //size = uart_tx_chars(UART_NUM_0, data, len);
+	//using tx_chars sends only a few bytes, and seems to be blocked by esp_log!!
+    size = uart_write_bytes(UART_NUM_0, data, len);
+    if (size > 0)
+    {
+        ESP_LOGI(TAG, "UART Wrote %d bytes", size);
+    }
+    else
+    {
+        ESP_LOGI(TAG, "UART Comm Failed");
+    }
 }
