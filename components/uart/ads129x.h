@@ -95,24 +95,32 @@ namespace ADS129x
         DEV_ID7 = 0x80,
         DEV_ID6 = 0x40,
         DEV_ID5 = 0x20,
+        DEV_ID4 = 0x10,
+        DEV_ID3 = 0x08,
         DEV_ID2 = 0x04,
         DEV_ID1 = 0x02,
         DEV_ID0 = 0x01,
+        DEV_CHAN_MASK = DEV_ID0 | DEV_ID1,
+        
+        DEV_ID_MASK = DEV_ID0 | DEV_ID1 | DEV_ID2 | DEV_ID3 | DEV_ID4 ,
 
-        ID_const = 0x10,
+        DEV_ID_MASK_129x = DEV_ID4,
+        DEV_ID_MASK_1299 = DEV_ID2 | DEV_ID3 | DEV_ID4,
+        /*ID_const = 0x10,
         ID_ADS129x = DEV_ID7,
-        ID_ADS129xR = (DEV_ID7 | DEV_ID6),
+        ID_ADS129xR = (DEV_ID7 | DEV_ID6),*/
 
         ID_4CHAN = 0,
         ID_6CHAN = DEV_ID0,
-        ID_8CHAN = DEV_ID1,
+        ID_8CHAN = DEV_ID1
 
-        ID_ADS1294 = (ID_ADS129x | ID_4CHAN),
+        /*ID_ADS1294 = (ID_ADS129x | ID_4CHAN),
         ID_ADS1296 = (ID_ADS129x | ID_6CHAN),
         ID_ADS1298 = (ID_ADS129x | ID_8CHAN),
         ID_ADS1294R = (ID_ADS129xR | ID_4CHAN),
         ID_ADS1296R = (ID_ADS129xR | ID_6CHAN),
         ID_ADS1298R = (ID_ADS129xR | ID_8CHAN)
+        */
     };
 
     enum CONFIG1_bits
@@ -602,6 +610,7 @@ LOW_POWR_250_SPS = (DR2 | DR1)
         WCTC_CH4P = (WCTC2 | WCTC1),
         WCTC_CH4N = (WCTC2 | WCTC1 | WCTC0)
     };
+
 
 #ifdef __cplusplus
 }

@@ -32,13 +32,20 @@
 #define START_PIN GPIO_NUM_26 //OUTPUT def L to use commands
 #define LED_PIN GPIO_NUM_32 //OUTPUT def L = LED off
 
+#include <stdint.h>
+
+
+extern volatile uint8_t spi_data_available;
 
 void spi_init();
-void adcSendCommand(int cmd);
+uint8_t spiRec();
+uint8_t spiRec(uint8_t *buf, uint8_t len);
+void spiSend(uint8_t b);
+void spiSend(uint8_t *buf, uint8_t len);
 
-void adcWreg(int reg, int val);
 void adcSendCommand(int cmd);
 void adcSendCommandLeaveCsActive(int cmd);
+void adcWreg(int reg, int val);
 int adcRreg(int reg);
 
 #endif // _ADS_COMMAND_H

@@ -16,6 +16,7 @@ CB
 #include "SerialCommand.h"
 #include "JsonCommand.h"
 #include "adsCommand.h"
+#include "Base64.h"
 #include "uart.h"
 #include "driver/spi_master.h"
 
@@ -24,6 +25,9 @@ CB
 #define TEXT_MODE 0
 #define JSONLINES_MODE 1
 #define MESSAGEPACK_MODE 2
+
+#define SPI_BUFFER_SIZE 200     //max 27 bytes ...
+#define OUTPUT_BUFFER_SIZE 1000 //same here
 
 const char *STATUS_TEXT_OK = "Ok";
 const char *STATUS_TEXT_BAD_REQUEST = "Bad request";
@@ -37,14 +41,37 @@ const char *board_name = "ADS1299 EVM";
 const char *maker_name = "Buchels";
 const char *driver_version = "v0.1";
 
+const char *json_rdatac_header = "{\"C\":200,\"D\":\"";
+const char *json_rdatac_footer = "\"}";
+
+const char messagepack_rdatac_header[] = {0x82, 0xa1, 0x43, 0xcc, 0xc8, 0xa1, 0x44, 0xc4};
+uint8_t messagepack_rdatac_header_size = sizeof(messagepack_rdatac_header);
+
 int protocol_mode = TEXT_MODE;
 //int protocol_mode = JSONLINES_MODE;
 
 int max_channels = 0;
 int num_active_channels = 0;
 bool active_channels[9]; // reports whether channels 1..9 are active
+int num_spi_bytes = 0;
+int num_timestamped_spi_bytes = 0;
 bool is_rdatac = false;
 bool base64_mode = true;
+
+char hexDigits[] = "0123456789ABCDEF";
+
+uint8_t spi_bytes[SPI_BUFFER_SIZE];
+
+// char buffer to send via USB
+char output_buffer[OUTPUT_BUFFER_SIZE];
+
+// microseconds timestamp
+#define TIMESTAMP_SIZE_IN_BYTES 4
+union
+{
+    char timestamp_bytes[TIMESTAMP_SIZE_IN_BYTES];
+    unsigned long timestamp;
+} timestamp_union;
 
 // sample number counter
 #define SAMPLE_NUMBER_SIZE_IN_BYTES 4
@@ -62,17 +89,33 @@ extern "C"
     void app_main();
 }
 
-int hex_to_long(char *digits) {
+int hex_to_long(char *digits)
+{
     using namespace std;
     char *error;
     int n = strtol(digits, &error, 16);
-    if (*error != 0) {
+    if (*error != 0)
+    {
         return -1; // error
-    } else {
+    }
+    else
+    {
         return n;
     }
 }
 
+void encode_hex(char *output, char *input, int input_len)
+{
+    register int count = 0;
+    for (register int i = 0; i < input_len; i++)
+    {
+        register uint8_t low_nybble = input[i] & 0x0f;
+        register uint8_t highNybble = input[i] >> 4;
+        output[count++] = hexDigits[highNybble];
+        output[count++] = hexDigits[low_nybble];
+    }
+    output[count] = 0;
+}
 
 void detectActiveChannels()
 { //set device into RDATAC (continous) mode -it will stream data
@@ -116,7 +159,8 @@ void send_response_ok()
     send_response(RESPONSE_OK, STATUS_TEXT_OK);
 }
 
-void send_response_error() {
+void send_response_error()
+{
     send_response(RESPONSE_ERROR, STATUS_TEXT_ERROR);
 }
 
@@ -368,19 +412,26 @@ void rdataCommand(unsigned char unused1, unsigned char unused2)
     //send_sample(); TBD
 }
 
-void readRegisterCommand(unsigned char unused1, unsigned char unused2) {
+void readRegisterCommand(unsigned char unused1, unsigned char unused2)
+{
     using namespace ADS129x;
     char *arg1;
     arg1 = serialCommand.next();
-    if (arg1 != NULL) {
+    if (arg1 != NULL)
+    {
         int registerNumber = hex_to_long(arg1);
-        if (registerNumber >= 0) {
+        if (registerNumber >= 0)
+        {
             int result = adcRreg(registerNumber);
-            printf("200 Ok (Read Register %#x)\n%#x\n",registerNumber,result);
-        } else {
+            printf("200 Ok (Read Register %#x)\n%#x\n", registerNumber, result);
+        }
+        else
+        {
             printf("402 Error: expected hexidecimal digits.\n");
         }
-    } else {
+    }
+    else
+    {
         printf("403 Error: register argument missing.\n");
     }
     printf("\n");
@@ -400,7 +451,7 @@ void writeRegisterCommand(unsigned char unused1, unsigned char unused2)
             if (registerNumber >= 0 && registerValue >= 0)
             {
                 adcWreg(registerNumber, registerValue);
-                printf("200 Ok (Write Register %#x %#x)\n",registerNumber,registerValue);
+                printf("200 Ok (Write Register %#x %#x)\n", registerNumber, registerValue);
             }
             else
             {
@@ -439,29 +490,39 @@ void readRegisterCommandDirect(unsigned char register_number, unsigned char unus
     }
 }
 
-void writeRegisterCommandDirect(unsigned char register_number, unsigned char register_value) {
-    if (register_number >= 0 && register_value >= 0) {
+void writeRegisterCommandDirect(unsigned char register_number, unsigned char register_value)
+{
+    if (register_number >= 0 && register_value >= 0)
+    {
         adcWreg(register_number, register_value);
         send_response_ok();
-    } else {
+    }
+    else
+    {
         send_response_error();
     }
 }
 
-void base64ModeOnCommand(unsigned char unused1, unsigned char unused2) {
+void base64ModeOnCommand(unsigned char unused1, unsigned char unused2)
+{
     base64_mode = true;
     send_response(RESPONSE_OK, "Base64 mode on - rdata command will respond with base64 encoded data.");
 }
 
-void hexModeOnCommand(unsigned char unused1, unsigned char unused2) {
+void hexModeOnCommand(unsigned char unused1, unsigned char unused2)
+{
     base64_mode = false;
     send_response(RESPONSE_OK, "Hex mode on - rdata command will respond with hex encoded data");
 }
 
-void helpCommand(unsigned char unused1, unsigned char unused2) {
-    if (protocol_mode == JSONLINES_MODE ||  protocol_mode == MESSAGEPACK_MODE) {
+void helpCommand(unsigned char unused1, unsigned char unused2)
+{
+    if (protocol_mode == JSONLINES_MODE || protocol_mode == MESSAGEPACK_MODE)
+    {
         send_response(RESPONSE_OK, "Help not available in JSON Lines or MessagePack modes.");
-    } else {
+    }
+    else
+    {
         printf("200 Ok\n");
         printf("Available commands: \n");
         serialCommand.printCommands();
@@ -469,15 +530,154 @@ void helpCommand(unsigned char unused1, unsigned char unused2) {
     }
 }
 
+inline void receive_sample()
+{ //inline necessary ??
+    gpio_set_level(CS_PIN, 0);
+    ets_delay_us(10); //wait 10us DO WE NEED THIS ??
+    memset(spi_bytes, 0, sizeof(spi_bytes));
+    timestamp_union.timestamp = esp_timer_get_time(); //cave 64bit
+    spi_bytes[0] = timestamp_union.timestamp_bytes[0];
+    spi_bytes[1] = timestamp_union.timestamp_bytes[1];
+    spi_bytes[2] = timestamp_union.timestamp_bytes[2];
+    spi_bytes[3] = timestamp_union.timestamp_bytes[3];
+    spi_bytes[4] = sample_number_union.sample_number_bytes[0];
+    spi_bytes[5] = sample_number_union.sample_number_bytes[1];
+    spi_bytes[6] = sample_number_union.sample_number_bytes[2];
+    spi_bytes[7] = sample_number_union.sample_number_bytes[3];
+
+    uint8_t returnCode = spiRec(spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES, num_spi_bytes);
+    gpio_set_level(CS_PIN, 1);
+    sample_number_union.sample_number++;
+}
+
+inline void send_sample_messagepack(int num_bytes)
+{
+    uart_write((char *)messagepack_rdatac_header, messagepack_rdatac_header_size);
+    uart_write((char *)&num_bytes, 1);
+    uart_write((char *)spi_bytes, num_bytes);
+}
+
+inline void send_sample(void)
+{
+    switch (protocol_mode)
+    {
+    case JSONLINES_MODE:
+        printf("%s", json_rdatac_header);
+        base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
+        printf("%s", output_buffer);
+        printf("%s\n", json_rdatac_footer);
+        break;
+    case TEXT_MODE:
+        if (base64_mode)
+        {
+            base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
+        }
+        else
+        {
+            encode_hex(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
+        }
+        printf("%s", output_buffer);
+        break;
+    case MESSAGEPACK_MODE:
+        send_sample_messagepack(num_timestamped_spi_bytes);
+        break;
+    }
+}
+
+inline void send_sample_json(int num_bytes)
+{
+    cJSON *root;
+    root = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, STATUS_CODE_KEY, cJSON_CreateNumber(STATUS_OK));
+    cJSON_AddItemToObject(root, STATUS_TEXT_KEY, cJSON_CreateString(STATUS_TEXT_OK));
+    cJSON_AddItemToObject(root, DATA_KEY, cJSON_CreateIntArray((const int *)spi_bytes, num_bytes));
+    jsonCommand.sendJsonLinesDocResponse(root);
+}
+
+inline void send_samples(void)
+{
+    if (!is_rdatac)
+        return;
+    if (spi_data_available)
+    {
+        spi_data_available = 0;
+        receive_sample();
+        send_sample();
+    }
+}
+
+void adsSetup()
+{ //default settings for ADS1298 and compatible chips
+    using namespace ADS129x;
+    // Send SDATAC Command (Stop Read Data Continuously mode)
+    spi_data_available = 0;
+    //attachInterrupt(digitalPinToInterrupt(IPIN_DRDY), drdy_interrupt, FALLING); done in spi_init
+    adcSendCommand(SDATAC);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    // delayMicroseconds(2);
+    //delay(100);
+    int val = adcRreg(ID);
+    switch (val & DEV_ID_MASK)
+    {
+    case (DEV_ID_MASK_129x | ID_4CHAN):
+        hardware_type = "ADS1294";
+        max_channels = 4;
+        break;
+    //case B10001:
+    case (DEV_ID_MASK_129x | ID_6CHAN):
+        hardware_type = "ADS1296";
+        max_channels = 6;
+        break;
+    //case B10010:
+    case (DEV_ID_MASK_129x | ID_8CHAN):
+        hardware_type = "ADS1298";
+        max_channels = 8;
+        break;
+    //case B11110:
+    case (DEV_ID_MASK_1299 | ID_8CHAN):
+        hardware_type = "ADS1299";
+        max_channels = 8;
+        break;
+    //case B11100:
+    case (DEV_ID_MASK_1299 | ID_4CHAN):
+        hardware_type = "ADS1299-4";
+        max_channels = 4;
+        break;
+    //case B11101:
+    case (DEV_ID_MASK_1299 | ID_6CHAN):
+        hardware_type = "ADS1299-6";
+        max_channels = 6;
+        break;
+    default:
+        max_channels = 0;
+    }
+    num_spi_bytes = (3 * (max_channels + 1)); //24-bits header plus 24-bits per channel
+    num_timestamped_spi_bytes = num_spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES;
+    if (max_channels == 0)
+    { //error mode
+        while (1)
+        {
+            gpio_set_level(LED_PIN, 1);
+            vTaskDelay(500 / portTICK_PERIOD_MS);
+            gpio_set_level(LED_PIN, 0);
+            vTaskDelay(500 / portTICK_PERIOD_MS);
+        }
+    } //error mode
+
+    // All GPIO set to output 0x0000: (floating CMOS inputs can flicker on and off, creating noise)
+    adcWreg(ADS_GPIO, 0);
+    adcWreg(CONFIG3, PD_REFBUF | CONFIG3_const);
+    gpio_set_level(START_PIN, 1); //Hmmm not sure ??? should be L to use commands ...
+}
+
 void app_main(void)
 {
     esp_log_level_set("*", ESP_LOG_INFO); //todo change by command
     //esp_log_level_set("*", ESP_LOG_NONE); //todo change by command
     uart_init();
+    protocol_mode = TEXT_MODE;
     spi_init();
-    
-    using namespace ADS129x;
-    adcSendCommand(SDATAC);
+    adsSetup();
 
     serialCommand.setDefaultHandler(unrecognized);                 //
     serialCommand.addCommand("nop", nopCommand);                   // No operation (does nothing)
@@ -504,7 +704,7 @@ void app_main(void)
     serialCommand.addCommand("wreg", writeRegisterCommand);        // Write ADS129x register, arguments in hex
     serialCommand.addCommand("base64", base64ModeOnCommand);       // RDATA commands send base64 encoded data - default
     serialCommand.addCommand("hex", hexModeOnCommand);             // RDATA commands send hex encoded data
-    serialCommand.addCommand("help", helpCommand);                   // Print list of commands
+    serialCommand.addCommand("help", helpCommand);                 // Print list of commands
     serialCommand.clearBuffer();
 
     jsonCommand.setDefaultHandler(unrecognizedJsonLines);        // Handler for any command that isn't matched
@@ -530,7 +730,7 @@ void app_main(void)
     jsonCommand.addCommand("rdata", rdataCommand);               // Read one sample of data from each active channel
     jsonCommand.addCommand("rreg", readRegisterCommandDirect);   // Read ADS129x register, argument in hex, print contents in hex
     jsonCommand.addCommand("wreg", writeRegisterCommandDirect);  // Write ADS129x register, arguments in hex
-    jsonCommand.addCommand("help", helpCommand);                   // Print list of commands
+    jsonCommand.addCommand("help", helpCommand);                 // Print list of commands
     jsonCommand.clearBuffer();
     while (1) //main loop
     {
@@ -547,7 +747,7 @@ void app_main(void)
             // do nothing
             ;
         }
-
-        vTaskDelay(10 / portTICK_RATE_MS); //wait --> see whether this is OK
+        send_samples();
+        vTaskDelay(10 / portTICK_PERIOD_MS); //wait --> see whether this is OK
     }
 }

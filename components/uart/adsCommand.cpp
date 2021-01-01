@@ -83,7 +83,8 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     gpio_set_level(LED_PIN, 0);    // LED off
     gpio_set_level(CLKSEL_PIN, 0); // use external clock
     gpio_set_level(RESET_PIN, 1);  // RESET H
-    vTaskDelay(100);               //now wait 2^18 tCLK = 128ms (13) but start with 1000ms (100)
+    //vTaskDelay(100);               //now wait 2^18 tCLK = 128ms (13) but start with 1000ms (100)
+    vTaskDelay(1000 / portTICK_PERIOD_MS);//now wait 2^18 tCLK = 128ms (13) but start with 1000ms (100)
     gpio_set_level(RESET_PIN, 0);  // RESET !
     ets_delay_us(10);              //2 tCLK = 0.9 us (1) but start with 10 us
     gpio_set_level(RESET_PIN, 1);  // done
@@ -106,7 +107,7 @@ uint8_t spiRec()
 }
 
 /** SPI receive multiple bytes */
-uint8_t spiRec(uint8_t *buf, size_t len)
+uint8_t spiRec(uint8_t *buf, uint8_t len)
 {
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
@@ -127,7 +128,7 @@ void spiSend(uint8_t b)
 }
 
 /** SPI send multiple bytes */
-void spiSend(uint8_t *buf, size_t len)
+void spiSend(uint8_t *buf, uint8_t len)
 {
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));             //Zero out the transaction
