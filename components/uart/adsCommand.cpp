@@ -43,7 +43,8 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     buscfg.sclk_io_num = GPIO_NUM_18;
     buscfg.quadwp_io_num = -1;
     buscfg.quadhd_io_num = -1;
-    buscfg.max_transfer_sz = 100;
+    buscfg.max_transfer_sz = 64; //should be enough
+
 
     devcfg.clock_speed_hz = 4 * 1000 * 1000; //Using 4 MHz mean we can send multibyte stuff in one go
                                              //hopefully we can chage that for data trasnfer
@@ -58,6 +59,7 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     spi_bus_add_device(VSPI_HOST, &devcfg, &spi);
 
     gpio_config_t gp;
+    gp.intr_type = GPIO_INTR_DISABLE;
     gp.mode = GPIO_MODE_OUTPUT;
     gp.pull_up_en = GPIO_PULLUP_ENABLE;
     gp.pull_down_en = GPIO_PULLDOWN_DISABLE;
@@ -69,15 +71,17 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     gp.pin_bit_mask = (1ULL << CLKSEL_PIN) | (1ULL << START_PIN) | (1ULL << LED_PIN);
     gpio_config(&gp);
 
+
     gp.mode = GPIO_MODE_INPUT;
     gp.intr_type = GPIO_INTR_NEGEDGE;
     gp.pull_up_en = GPIO_PULLUP_ENABLE;
     gp.pull_down_en = GPIO_PULLDOWN_DISABLE;
     gp.pin_bit_mask = 1ULL << DRDY_PIN;
     gpio_config(&gp);
+   
     gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
     gpio_isr_handler_add(DRDY_PIN, drdy_interrupt, (void *)DRDY_PIN);
-
+    
 
     //startup p.62
     gpio_set_level(LED_PIN, 0);    // LED off

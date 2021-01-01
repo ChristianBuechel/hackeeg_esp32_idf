@@ -47,8 +47,8 @@ const char *json_rdatac_footer = "\"}";
 const char messagepack_rdatac_header[] = {0x82, 0xa1, 0x43, 0xcc, 0xc8, 0xa1, 0x44, 0xc4};
 uint8_t messagepack_rdatac_header_size = sizeof(messagepack_rdatac_header);
 
-int protocol_mode = TEXT_MODE;
-//int protocol_mode = JSONLINES_MODE;
+//int protocol_mode = TEXT_MODE;
+int protocol_mode = JSONLINES_MODE;
 
 int max_channels = 0;
 int num_active_channels = 0;
@@ -191,6 +191,148 @@ void unrecognizedJsonLines(const char *command)
     free(text);
     cJSON_Delete(root);*/
     jsonCommand.sendJsonLinesDocResponse(root); //als Alternative
+}
+
+inline void receive_sample()
+{ //inline necessary ??
+    gpio_set_level(CS_PIN, 0);
+    ets_delay_us(10); //wait 10us DO WE NEED THIS ??
+    memset(spi_bytes, 0, sizeof(spi_bytes));
+    timestamp_union.timestamp = esp_timer_get_time(); //cave 64bit
+    spi_bytes[0] = timestamp_union.timestamp_bytes[0];
+    spi_bytes[1] = timestamp_union.timestamp_bytes[1];
+    spi_bytes[2] = timestamp_union.timestamp_bytes[2];
+    spi_bytes[3] = timestamp_union.timestamp_bytes[3];
+    spi_bytes[4] = sample_number_union.sample_number_bytes[0];
+    spi_bytes[5] = sample_number_union.sample_number_bytes[1];
+    spi_bytes[6] = sample_number_union.sample_number_bytes[2];
+    spi_bytes[7] = sample_number_union.sample_number_bytes[3];
+
+    uint8_t returnCode = spiRec(spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES, num_spi_bytes);
+    gpio_set_level(CS_PIN, 1);
+    sample_number_union.sample_number++;
+}
+
+inline void send_sample_messagepack(int num_bytes)
+{
+    uart_write((char *)messagepack_rdatac_header, messagepack_rdatac_header_size);
+    uart_write((char *)&num_bytes, 1);
+    uart_write((char *)spi_bytes, num_bytes);
+}
+
+inline void send_sample(void)
+{
+    switch (protocol_mode)
+    {
+    case JSONLINES_MODE:
+        printf("%s", json_rdatac_header);
+        base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
+        printf("%s", output_buffer);
+        printf("%s\n", json_rdatac_footer);
+        break;
+    case TEXT_MODE:
+        if (base64_mode)
+        {
+            base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
+        }
+        else
+        {
+            encode_hex(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
+        }
+        printf("%s", output_buffer);
+        break;
+    case MESSAGEPACK_MODE:
+        send_sample_messagepack(num_timestamped_spi_bytes);
+        break;
+    }
+}
+
+inline void send_sample_json(int num_bytes)
+{
+    cJSON *root;
+    root = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, STATUS_CODE_KEY, cJSON_CreateNumber(STATUS_OK));
+    cJSON_AddItemToObject(root, STATUS_TEXT_KEY, cJSON_CreateString(STATUS_TEXT_OK));
+    cJSON_AddItemToObject(root, DATA_KEY, cJSON_CreateIntArray((const int *)spi_bytes, num_bytes));
+    jsonCommand.sendJsonLinesDocResponse(root);
+}
+
+inline void send_samples(void)
+{
+    if (!is_rdatac)
+        return;
+    if (spi_data_available)
+    {
+        spi_data_available = 0;
+        receive_sample();
+        send_sample();
+    }
+}
+
+void adsSetup()
+{ //default settings for ADS1298 and compatible chips
+    using namespace ADS129x;
+    // Send SDATAC Command (Stop Read Data Continuously mode)
+    spi_data_available = 0;
+    //attachInterrupt(digitalPinToInterrupt(IPIN_DRDY), drdy_interrupt, FALLING); done in spi_init
+    adcSendCommand(SDATAC);
+    
+    //vTaskDelay(1000 / portTICK_PERIOD_MS);
+    
+    // delayMicroseconds(2);
+    //delay(100);
+    int val = adcRreg(ID);
+    switch (val & DEV_ID_MASK)
+    {
+    case (DEV_ID_MASK_129x | ID_4CHAN):
+        hardware_type = "ADS1294";
+        max_channels = 4;
+        break;
+    //case B10001:
+    case (DEV_ID_MASK_129x | ID_6CHAN):
+        hardware_type = "ADS1296";
+        max_channels = 6;
+        break;
+    //case B10010:
+    case (DEV_ID_MASK_129x | ID_8CHAN):
+        hardware_type = "ADS1298";
+        max_channels = 8;
+        break;
+    //case B11110:
+    case (DEV_ID_MASK_1299 | ID_8CHAN):
+        hardware_type = "ADS1299";
+        max_channels = 8;
+        break;
+    //case B11100:
+    case (DEV_ID_MASK_1299 | ID_4CHAN):
+        hardware_type = "ADS1299-4";
+        max_channels = 4;
+        break;
+    //case B11101:
+    case (DEV_ID_MASK_1299 | ID_6CHAN):
+        hardware_type = "ADS1299-6";
+        max_channels = 6;
+        break;
+    default:
+        max_channels = 0;
+    }
+    num_spi_bytes = (3 * (max_channels + 1)); //24-bits header plus 24-bits per channel
+    num_timestamped_spi_bytes = num_spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES;
+    if (max_channels == 0)
+    { //error mode
+        //while (1) TBD
+        {
+            gpio_set_level(LED_PIN, 1);
+            vTaskDelay(50 / portTICK_PERIOD_MS);
+            gpio_set_level(LED_PIN, 0);
+            vTaskDelay(50 / portTICK_PERIOD_MS);
+        }
+    } //error mode
+
+    // All GPIO set to output 0x0000: (floating CMOS inputs can flicker on and off, creating noise)
+    adcWreg(ADS_GPIO, 0);
+    adcWreg(CONFIG3, PD_REFBUF | CONFIG3_const);
+    gpio_set_level(START_PIN, 1); //Hmmm not sure ??? should be L to use commands ...
 }
 
 void nopCommand(unsigned char unused1, unsigned char unused2)
@@ -355,8 +497,8 @@ void resetCommand(unsigned char unused1, unsigned char unused2)
 {
     using namespace ADS129x;
     adcSendCommand(RESET);
-    //adsSetup(); TBD
     send_response_ok();
+    adsSetup();
 }
 
 void startCommand(unsigned char unused1, unsigned char unused2)
@@ -409,7 +551,7 @@ void rdataCommand(unsigned char unused1, unsigned char unused2)
     {
         send_response_ok();
     }
-    //send_sample(); TBD
+    send_sample();
 }
 
 void readRegisterCommand(unsigned char unused1, unsigned char unused2)
@@ -530,154 +672,19 @@ void helpCommand(unsigned char unused1, unsigned char unused2)
     }
 }
 
-inline void receive_sample()
-{ //inline necessary ??
-    gpio_set_level(CS_PIN, 0);
-    ets_delay_us(10); //wait 10us DO WE NEED THIS ??
-    memset(spi_bytes, 0, sizeof(spi_bytes));
-    timestamp_union.timestamp = esp_timer_get_time(); //cave 64bit
-    spi_bytes[0] = timestamp_union.timestamp_bytes[0];
-    spi_bytes[1] = timestamp_union.timestamp_bytes[1];
-    spi_bytes[2] = timestamp_union.timestamp_bytes[2];
-    spi_bytes[3] = timestamp_union.timestamp_bytes[3];
-    spi_bytes[4] = sample_number_union.sample_number_bytes[0];
-    spi_bytes[5] = sample_number_union.sample_number_bytes[1];
-    spi_bytes[6] = sample_number_union.sample_number_bytes[2];
-    spi_bytes[7] = sample_number_union.sample_number_bytes[3];
-
-    uint8_t returnCode = spiRec(spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES, num_spi_bytes);
-    gpio_set_level(CS_PIN, 1);
-    sample_number_union.sample_number++;
-}
-
-inline void send_sample_messagepack(int num_bytes)
-{
-    uart_write((char *)messagepack_rdatac_header, messagepack_rdatac_header_size);
-    uart_write((char *)&num_bytes, 1);
-    uart_write((char *)spi_bytes, num_bytes);
-}
-
-inline void send_sample(void)
-{
-    switch (protocol_mode)
-    {
-    case JSONLINES_MODE:
-        printf("%s", json_rdatac_header);
-        base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
-        printf("%s", output_buffer);
-        printf("%s\n", json_rdatac_footer);
-        break;
-    case TEXT_MODE:
-        if (base64_mode)
-        {
-            base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
-        }
-        else
-        {
-            encode_hex(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
-        }
-        printf("%s", output_buffer);
-        break;
-    case MESSAGEPACK_MODE:
-        send_sample_messagepack(num_timestamped_spi_bytes);
-        break;
-    }
-}
-
-inline void send_sample_json(int num_bytes)
-{
-    cJSON *root;
-    root = cJSON_CreateObject();
-    cJSON_AddItemToObject(root, STATUS_CODE_KEY, cJSON_CreateNumber(STATUS_OK));
-    cJSON_AddItemToObject(root, STATUS_TEXT_KEY, cJSON_CreateString(STATUS_TEXT_OK));
-    cJSON_AddItemToObject(root, DATA_KEY, cJSON_CreateIntArray((const int *)spi_bytes, num_bytes));
-    jsonCommand.sendJsonLinesDocResponse(root);
-}
-
-inline void send_samples(void)
-{
-    if (!is_rdatac)
-        return;
-    if (spi_data_available)
-    {
-        spi_data_available = 0;
-        receive_sample();
-        send_sample();
-    }
-}
-
-void adsSetup()
-{ //default settings for ADS1298 and compatible chips
-    using namespace ADS129x;
-    // Send SDATAC Command (Stop Read Data Continuously mode)
-    spi_data_available = 0;
-    //attachInterrupt(digitalPinToInterrupt(IPIN_DRDY), drdy_interrupt, FALLING); done in spi_init
-    adcSendCommand(SDATAC);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    // delayMicroseconds(2);
-    //delay(100);
-    int val = adcRreg(ID);
-    switch (val & DEV_ID_MASK)
-    {
-    case (DEV_ID_MASK_129x | ID_4CHAN):
-        hardware_type = "ADS1294";
-        max_channels = 4;
-        break;
-    //case B10001:
-    case (DEV_ID_MASK_129x | ID_6CHAN):
-        hardware_type = "ADS1296";
-        max_channels = 6;
-        break;
-    //case B10010:
-    case (DEV_ID_MASK_129x | ID_8CHAN):
-        hardware_type = "ADS1298";
-        max_channels = 8;
-        break;
-    //case B11110:
-    case (DEV_ID_MASK_1299 | ID_8CHAN):
-        hardware_type = "ADS1299";
-        max_channels = 8;
-        break;
-    //case B11100:
-    case (DEV_ID_MASK_1299 | ID_4CHAN):
-        hardware_type = "ADS1299-4";
-        max_channels = 4;
-        break;
-    //case B11101:
-    case (DEV_ID_MASK_1299 | ID_6CHAN):
-        hardware_type = "ADS1299-6";
-        max_channels = 6;
-        break;
-    default:
-        max_channels = 0;
-    }
-    num_spi_bytes = (3 * (max_channels + 1)); //24-bits header plus 24-bits per channel
-    num_timestamped_spi_bytes = num_spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES;
-    if (max_channels == 0)
-    { //error mode
-        while (1)
-        {
-            gpio_set_level(LED_PIN, 1);
-            vTaskDelay(500 / portTICK_PERIOD_MS);
-            gpio_set_level(LED_PIN, 0);
-            vTaskDelay(500 / portTICK_PERIOD_MS);
-        }
-    } //error mode
-
-    // All GPIO set to output 0x0000: (floating CMOS inputs can flicker on and off, creating noise)
-    adcWreg(ADS_GPIO, 0);
-    adcWreg(CONFIG3, PD_REFBUF | CONFIG3_const);
-    gpio_set_level(START_PIN, 1); //Hmmm not sure ??? should be L to use commands ...
-}
-
 void app_main(void)
 {
-    esp_log_level_set("*", ESP_LOG_INFO); //todo change by command
-    //esp_log_level_set("*", ESP_LOG_NONE); //todo change by command
+    //esp_log_level_set("*", ESP_LOG_INFO); //todo change by command
+    esp_log_level_set("*", ESP_LOG_NONE); //todo change by command
+    ESP_LOGI(TAG, "Hi");
     uart_init();
-    protocol_mode = TEXT_MODE;
+    //protocol_mode = TEXT_MODE;
+    protocol_mode = JSONLINES_MODE;
+    ESP_LOGI(TAG, "UART initialized");
     spi_init();
+    ESP_LOGI(TAG, "SPI initialized");
     adsSetup();
+    ESP_LOGI(TAG, "ADS1299 initialized");
 
     serialCommand.setDefaultHandler(unrecognized);                 //
     serialCommand.addCommand("nop", nopCommand);                   // No operation (does nothing)

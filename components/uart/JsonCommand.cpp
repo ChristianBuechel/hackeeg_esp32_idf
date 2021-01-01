@@ -261,7 +261,8 @@ void JsonCommand::sendJsonLinesResponse(int status_code, char *status_text)
     cJSON_AddItemToObject(response, STATUS_TEXT_KEY, cJSON_CreateString(status_text));
     ESP_LOGI(TAG, "Bad r after add %d",esp_get_free_heap_size());
     
-    char* text = cJSON_Print(response);
+    //char* text = cJSON_Print(response);
+    char* text = cJSON_PrintUnformatted(response);
     printf("%s\n", text);
     free(text);
 
@@ -277,7 +278,8 @@ void JsonCommand::sendJsonLinesDocResponse(cJSON *doc)
     doc.clear();*/
     ESP_LOGI(TAG, "sendJsonLinesDocResponse Free Heap before del %d",esp_get_free_heap_size());
     
-    char* text = cJSON_Print(doc);
+    //char* text = cJSON_Print(doc);
+    char* text = cJSON_PrintUnformatted(doc);
     printf("%s\n", text);
     //printf("and now directly to UART (%d bytes)\n",strlen(text));
     //uart_write(text, strlen(text));
