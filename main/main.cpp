@@ -320,7 +320,7 @@ void adsSetup()
     num_timestamped_spi_bytes = num_spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES;
     if (max_channels == 0)
     { //error mode
-        //while (1) TBD
+        while (1) 
         {
             gpio_set_level(LED_PIN, 1);
             vTaskDelay(50 / portTICK_PERIOD_MS);
@@ -674,6 +674,14 @@ void helpCommand(unsigned char unused1, unsigned char unused2)
 
 void app_main(void)
 {
+/*Bootloader config
+Bootloader log verbosity
+-->No output
+
+Log output
+Default log verbosity
+-->No output*/
+
     //esp_log_level_set("*", ESP_LOG_INFO); //todo change by command
     esp_log_level_set("*", ESP_LOG_NONE); //todo change by command
     ESP_LOGI(TAG, "Hi");

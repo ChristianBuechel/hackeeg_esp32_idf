@@ -27,7 +27,7 @@ void uart_init()
 		.flow_ctrl = UART_HW_FLOWCTRL_DISABLE};
 	uart_param_config(UART_NUM_0, &uart_config);
 	uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-	uart_driver_install(UART_NUM_0, uart_buffer_size, 0, 0, NULL, 0);
+	uart_driver_install(UART_NUM_0, uart_buffer_size, 0, 0, NULL, 0); //no TX buffer??
 }
 
 void uart_write(char *data, uint8_t len)
@@ -35,6 +35,7 @@ void uart_write(char *data, uint8_t len)
     int size;
     //size = uart_tx_chars(UART_NUM_0, data, len);
 	//using tx_chars sends only a few bytes, and seems to be blocked by esp_log!!
+	//maybe uart_fill_fifo is interesting in ISR on DRDY L
     size = uart_write_bytes(UART_NUM_0, data, len);
     if (size > 0)
     {

@@ -23,14 +23,14 @@
 
 #define ESP_INTR_FLAG_DEFAULT 0
 
-#define DRDY_PIN GPIO_NUM_27 //INPUT with ISR falling edge
+#define DRDY_PIN GPIO_NUM_17 //INPUT with ISR falling edge
 
 #define CS_PIN GPIO_NUM_5 //OUTPUT def H pull L to start
-#define RESET_PIN GPIO_NUM_25 //OUTPUT def H pull L to reset
+#define RESET_PIN GPIO_NUM_34 //OUTPUT def H pull L to reset
 
-#define CLKSEL_PIN GPIO_NUM_33 //OUTPUT def L using ext clock
-#define START_PIN GPIO_NUM_26 //OUTPUT def L to use commands
-#define LED_PIN GPIO_NUM_32 //OUTPUT def L = LED off
+#define CLKSEL_PIN GPIO_NUM_16 //OUTPUT def L using ext clock
+#define START_PIN GPIO_NUM_35 //OUTPUT def L to use commands
+#define LED_PIN GPIO_NUM_33 //OUTPUT def L = LED off
 
 #include <stdint.h>
 
