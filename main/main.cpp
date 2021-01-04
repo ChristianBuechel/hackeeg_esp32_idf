@@ -26,8 +26,8 @@ CB
 #define JSONLINES_MODE 1
 #define MESSAGEPACK_MODE 2
 
-#define SPI_BUFFER_SIZE 200     //max 27 bytes ...
-#define OUTPUT_BUFFER_SIZE 1000 //same here
+#define SPI_BUFFER_SIZE 200    //max 27 bytes ...
+#define OUTPUT_BUFFER_SIZE 512 //same here
 
 const char *STATUS_TEXT_OK = "Ok";
 const char *STATUS_TEXT_BAD_REQUEST = "Bad request";
@@ -42,7 +42,9 @@ const char *maker_name = "Buchels";
 const char *driver_version = "v0.1";
 
 const char *json_rdatac_header = "{\"C\":200,\"D\":\"";
+uint8_t json_rdatac_header_size = sizeof(json_rdatac_header);
 const char *json_rdatac_footer = "\"}";
+uint8_t json_rdatac_footer_size = sizeof(json_rdatac_footer);
 
 const char messagepack_rdatac_header[] = {0x82, 0xa1, 0x43, 0xcc, 0xc8, 0xa1, 0x44, 0xc4};
 uint8_t messagepack_rdatac_header_size = sizeof(messagepack_rdatac_header);
@@ -58,12 +60,16 @@ int num_timestamped_spi_bytes = 0;
 bool is_rdatac = false;
 bool base64_mode = true;
 
+int b64len = 0;
+int hexlen = 0;
+
 char hexDigits[] = "0123456789ABCDEF";
 
 uint8_t spi_bytes[SPI_BUFFER_SIZE];
 
 // char buffer to send via USB
 char output_buffer[OUTPUT_BUFFER_SIZE];
+char temp_buffer[OUTPUT_BUFFER_SIZE];
 
 // microseconds timestamp
 #define TIMESTAMP_SIZE_IN_BYTES 4
@@ -104,7 +110,7 @@ int hex_to_long(char *digits)
     }
 }
 
-void encode_hex(char *output, char *input, int input_len)
+int encode_hex(char *output, char *input, int input_len)
 {
     register int count = 0;
     for (register int i = 0; i < input_len; i++)
@@ -115,6 +121,7 @@ void encode_hex(char *output, char *input, int input_len)
         output[count++] = hexDigits[low_nybble];
     }
     output[count] = 0;
+    return count;
 }
 
 void detectActiveChannels()
@@ -215,9 +222,18 @@ inline void receive_sample()
 
 inline void send_sample_messagepack(int num_bytes)
 {
-    uart_write((char *)messagepack_rdatac_header, messagepack_rdatac_header_size);
+    /*uart_write((char *)messagepack_rdatac_header, messagepack_rdatac_header_size);
     uart_write((char *)&num_bytes, 1);
-    uart_write((char *)spi_bytes, num_bytes);
+    uart_write((char *)spi_bytes, num_bytes);*/
+
+    size_t count = 0;
+    memcpy(&output_buffer[count], messagepack_rdatac_header, messagepack_rdatac_header_size);
+    count += messagepack_rdatac_header_size;
+    output_buffer[count++] = (char)num_bytes;
+    memcpy(&output_buffer[count], spi_bytes, num_bytes);
+    count += num_bytes;
+    output_buffer[count++] = 0x0a;
+    uart_write((char *)output_buffer, count);
 }
 
 inline void send_sample(void)
@@ -225,21 +241,37 @@ inline void send_sample(void)
     switch (protocol_mode)
     {
     case JSONLINES_MODE:
-        printf("%s", json_rdatac_header);
+        /*printf("%s", json_rdatac_header);
         base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
         printf("%s", output_buffer);
         printf("%s\n", json_rdatac_footer);
+        break;*/
+        {
+            b64len = base64_encode(temp_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
+            size_t count = 0;
+            memcpy(&output_buffer[count], json_rdatac_header, json_rdatac_header_size);
+            count += json_rdatac_header_size;
+            memcpy(&output_buffer[count], temp_buffer, b64len);
+            count += b64len;
+            memcpy(&output_buffer[count], json_rdatac_footer, json_rdatac_footer_size);
+            count += json_rdatac_footer_size;
+            output_buffer[count++] = 0x0a;
+            uart_write((char *)output_buffer, count);
+        }
         break;
     case TEXT_MODE:
         if (base64_mode)
         {
-            base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
+            b64len = base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
         }
         else
         {
-            encode_hex(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
+            b64len = encode_hex(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
         }
-        printf("%s\n", output_buffer);
+        //printf("%s\n", output_buffer);
+        output_buffer[b64len++] = 0x0a; //add newline
+        uart_write((char *)output_buffer, b64len);
+
         break;
     case MESSAGEPACK_MODE:
         send_sample_messagepack(num_timestamped_spi_bytes);
@@ -276,9 +308,9 @@ void adsSetup()
     spi_data_available = 0;
     //attachInterrupt(digitalPinToInterrupt(IPIN_DRDY), drdy_interrupt, FALLING); done in spi_init
     adcSendCommand(SDATAC);
-    
+
     //vTaskDelay(1000 / portTICK_PERIOD_MS);
-    
+
     // delayMicroseconds(2);
     //delay(100);
     int val = adcRreg(ID);
@@ -320,7 +352,7 @@ void adsSetup()
     num_timestamped_spi_bytes = num_spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES;
     if (max_channels == 0)
     { //error mode
-        while (1) 
+        while (1)
         {
             gpio_set_level(LED_PIN, 1);
             vTaskDelay(50 / portTICK_PERIOD_MS);
@@ -658,6 +690,24 @@ void hexModeOnCommand(unsigned char unused1, unsigned char unused2)
     send_response(RESPONSE_OK, "Hex mode on - rdata command will respond with hex encoded data");
 }
 
+void testCommand(unsigned char unused1, unsigned char unused2)
+{
+    using namespace ADS129x;
+    adcSendCommand(START);
+    sample_number_union.sample_number = 0;
+
+    adcWreg(ADS129x::CONFIG2, (CONFIG2_const | INT_TEST_4HZ));
+    adcWreg(ADS129x::CH1SET, TEST_SIGNAL);
+    adcWreg(ADS129x::CH2SET, SHORTED);
+    adcWreg(ADS129x::CH3SET, TEST_SIGNAL);
+    adcWreg(ADS129x::CH4SET, SHORTED);
+    adcWreg(ADS129x::CH5SET, TEMP);
+    is_rdatac = true;
+    adcSendCommand(RDATAC);
+
+    send_response(RESPONSE_OK, "Test - Square on ch 1 and ch 3");
+}
+
 void helpCommand(unsigned char unused1, unsigned char unused2)
 {
     if (protocol_mode == JSONLINES_MODE || protocol_mode == MESSAGEPACK_MODE)
@@ -675,7 +725,7 @@ void helpCommand(unsigned char unused1, unsigned char unused2)
 
 void app_main(void)
 {
-/*Bootloader config
+    /*Bootloader config
 Bootloader log verbosity
 -->No output
 
@@ -687,8 +737,8 @@ Default log verbosity
     esp_log_level_set("*", ESP_LOG_NONE); //todo change by command
     ESP_LOGI(TAG, "Hi");
     uart_init();
-    //protocol_mode = TEXT_MODE;
-    protocol_mode = JSONLINES_MODE;
+    protocol_mode = TEXT_MODE;
+    //protocol_mode = JSONLINES_MODE;
     ESP_LOGI(TAG, "UART initialized");
     spi_init();
     ESP_LOGI(TAG, "SPI initialized");
@@ -720,6 +770,7 @@ Default log verbosity
     serialCommand.addCommand("wreg", writeRegisterCommand);        // Write ADS129x register, arguments in hex
     serialCommand.addCommand("base64", base64ModeOnCommand);       // RDATA commands send base64 encoded data - default
     serialCommand.addCommand("hex", hexModeOnCommand);             // RDATA commands send hex encoded data
+    serialCommand.addCommand("test", testCommand);                 // set to square wave enable ch 1 and 3
     serialCommand.addCommand("help", helpCommand);                 // Print list of commands
     serialCommand.clearBuffer();
 

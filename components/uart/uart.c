@@ -27,7 +27,8 @@ void uart_init()
 		.flow_ctrl = UART_HW_FLOWCTRL_DISABLE};
 	uart_param_config(UART_NUM_0, &uart_config);
 	uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-	uart_driver_install(UART_NUM_0, uart_buffer_size, 0, 0, NULL, 0); //no TX buffer??
+	//uart_driver_install(UART_NUM_0, uart_buffer_size, 0, 0, NULL, 0); //no TX buffer??
+	uart_driver_install(UART_NUM_0, uart_buffer_size, uart_buffer_size, 0, NULL, 0); //with TX buffer??
 }
 
 void uart_write(char *data, uint8_t len)

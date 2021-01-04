@@ -47,7 +47,8 @@ void spi_init() //probably need to re-init when transfering data at hign speed
 
 
     devcfg.clock_speed_hz = 4 * 1000 * 1000; //Using 4 MHz mean we can send multibyte stuff in one go
-                                             //hopefully we can chage that for data trasnfer
+                                             //hopefully we can chage that for data transfer
+                                             //works (RDATAC) with 14 MHz
     devcfg.mode = 1;                         //SPI mode 1 p.12 CPOL = 0 and CPHA = 1.
     //devcfg.cs_ena_posttrans = 4;           //p.38 ADS1299 data sheet NOT needed if CS driven manaully
     //devcfg.spics_io_num = CS_PIN;          //let esp operate CS pin
