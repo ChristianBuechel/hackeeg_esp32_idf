@@ -239,7 +239,7 @@ inline void send_sample(void)
         {
             encode_hex(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
         }
-        printf("%s", output_buffer);
+        printf("%s\n", output_buffer);
         break;
     case MESSAGEPACK_MODE:
         send_sample_messagepack(num_timestamped_spi_bytes);
@@ -332,7 +332,8 @@ void adsSetup()
     // All GPIO set to output 0x0000: (floating CMOS inputs can flicker on and off, creating noise)
     adcWreg(ADS_GPIO, 0);
     adcWreg(CONFIG3, PD_REFBUF | CONFIG3_const);
-    gpio_set_level(START_PIN, 1); //Hmmm not sure ??? should be L to use commands ...
+    //gpio_set_level(START_PIN, 1); //Hmmm not sure ??? should be L to use commands ...
+    gpio_set_level(START_PIN, 0); //L to use commands ...
 }
 
 void nopCommand(unsigned char unused1, unsigned char unused2)
@@ -545,7 +546,7 @@ void rdataCommand(unsigned char unused1, unsigned char unused2)
 {
     using namespace ADS129x;
     while (gpio_get_level(DRDY_PIN) == 1)
-        ;
+        ; //wdt kicks in ...
     adcSendCommandLeaveCsActive(RDATA);
     if (protocol_mode == TEXT_MODE)
     {

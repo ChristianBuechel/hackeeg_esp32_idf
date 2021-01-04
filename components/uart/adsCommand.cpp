@@ -54,7 +54,7 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     //BUT then keep CS_PIN out of GPIO stuff otherwise it does not work
     devcfg.spics_io_num = -1;                //we operate CS pin manually use -1
     devcfg.queue_size = 1;                   //only one transactions at a time
-
+    //devcfg.flags = SPI_DEVICE_HALFDUPLEX;    // try half duplex
     spi_bus_initialize(VSPI_HOST, &buscfg, 0); //no DMA
     spi_bus_add_device(VSPI_HOST, &devcfg, &spi);
 
@@ -86,6 +86,7 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     //startup p.62
     gpio_set_level(LED_PIN, 0);    // LED off
     gpio_set_level(CLKSEL_PIN, 0); // use external clock
+    //gpio_set_level(CLKSEL_PIN, 1); // use internal clock like hackeeg
     gpio_set_level(RESET_PIN, 1);  // RESET H
     //vTaskDelay(100);               //now wait 2^18 tCLK = 128ms (13) but start with 1000ms (100)
     vTaskDelay(1000 / portTICK_PERIOD_MS);//now wait 2^18 tCLK = 128ms (13) but start with 1000ms (100)
@@ -96,7 +97,7 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     gpio_set_level(START_PIN, 0); // control by command
 
     gpio_set_level(CS_PIN, 1);    // CS H
-    gpio_set_level(RESET_PIN, 1); // RESET H
+    //gpio_set_level(RESET_PIN, 1); // RESET H
 }
 
 /** SPI receive a byte */
@@ -110,6 +111,9 @@ uint8_t spiRec()
     return *(uint8_t *)t.rx_data;
 }
 
+//uint8_t tx_data[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+uint8_t tx_data[100] = {0};
+//memset(tx_data, 0, sizeof(tx_data));
 /** SPI receive multiple bytes */
 uint8_t spiRec(uint8_t *buf, uint8_t len)
 {
@@ -117,6 +121,9 @@ uint8_t spiRec(uint8_t *buf, uint8_t len)
     memset(&t, 0, sizeof(t));
     t.length = 8 * len;
     t.rx_buffer = buf;
+    //t.tx_buffer = NULL; //no sending data !!
+    t.tx_buffer = tx_data; // sending zeros !!
+    t.flags     = 0; 
     spi_device_polling_transmit(spi, &t);
     return 0;
 }

@@ -105,7 +105,7 @@ void JsonCommand::readSerial()
     while (length > 0)
     {
         uint8_t inChar;
-        length = uart_read_bytes(UART_NUM_0, &inChar, 1, 100);
+        length = uart_read_bytes(UART_NUM_0, &inChar, 1, 100); 
         uart_get_buffered_data_len(UART_NUM_0, (size_t *)&length);
         //char inChar = Serial.read();   // Read single available character, there may be more waiting
 
@@ -186,9 +186,11 @@ void JsonCommand::readSerial()
             if (array_size > 0)
             {
                 register_number = cJSON_GetArrayItem(cj_array, 0)->valueint;
+                //perform range check here [0.255]
                 ESP_LOGI(TAG, "register_number: %d", register_number);
                 if (array_size > 1)
                 {
+                    //perform range check here [0.255]
                     register_value = cJSON_GetArrayItem(cj_array, 1)->valueint;
                     ESP_LOGI(TAG, "register_value: %d", register_value);
                 }
