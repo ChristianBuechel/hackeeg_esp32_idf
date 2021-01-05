@@ -7,6 +7,7 @@ CB
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_system.h"
 #include "esp_spi_flash.h"
 #include "esp_log.h"
@@ -57,7 +58,7 @@ int num_active_channels = 0;
 bool active_channels[9]; // reports whether channels 1..9 are active
 int num_spi_bytes = 0;
 int num_timestamped_spi_bytes = 0;
-bool is_rdatac = false;
+
 bool base64_mode = true;
 
 int b64len = 0;
@@ -732,7 +733,6 @@ Bootloader log verbosity
 Log output
 Default log verbosity
 -->No output*/
-
     //esp_log_level_set("*", ESP_LOG_INFO); //todo change by command
     esp_log_level_set("*", ESP_LOG_NONE); //todo change by command
     ESP_LOGI(TAG, "Hi");
@@ -814,7 +814,13 @@ Default log verbosity
             // do nothing
             ;
         }
-        send_samples();
-        vTaskDelay(10 / portTICK_PERIOD_MS); //wait --> see whether this is OK
+
+        if (xSemaphoreTake(xSemaphore, 10 / portTICK_PERIOD_MS) == pdTRUE) //read uart every 10 ms
+        {
+            send_samples();
+            }
+
+        /*send_samples();
+        vTaskDelay(10 / portTICK_PERIOD_MS); //wait --> see whether this is OK*/
     }
 }

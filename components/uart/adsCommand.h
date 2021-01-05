@@ -33,9 +33,15 @@
 #define LED_PIN GPIO_NUM_33 //OUTPUT def L = LED off
 
 #include <stdint.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 
+extern SemaphoreHandle_t xSemaphore;
 
 extern volatile uint8_t spi_data_available;
+extern volatile bool is_rdatac;
+
 
 void spi_init();
 uint8_t spiRec();
