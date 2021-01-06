@@ -49,9 +49,9 @@ uint8_t spiRec(uint8_t *buf, uint8_t len);
 void spiSend(uint8_t b);
 void spiSend(uint8_t *buf, uint8_t len);
 
-void adcSendCommand(int cmd);
-void adcSendCommandLeaveCsActive(int cmd);
-void adcWreg(int reg, int val);
-int adcRreg(int reg);
+void adcSendCommand(uint8_t cmd);
+//void adcSendCommandLeaveCsActive(int cmd);
+void adcWreg(uint8_t reg, uint8_t val);
+uint8_t adcRreg(uint8_t reg);
 
 #endif // _ADS_COMMAND_H

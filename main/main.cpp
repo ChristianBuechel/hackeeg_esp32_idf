@@ -60,7 +60,7 @@ int num_spi_bytes = 0;
 int num_timestamped_spi_bytes = 0;
 
 bool base64_mode = true;
-
+bool mpText_mode = false;
 int b64len = 0;
 int hexlen = 0;
 
@@ -203,8 +203,8 @@ void unrecognizedJsonLines(const char *command)
 
 inline void receive_sample()
 { //inline necessary ??
-    gpio_set_level(CS_PIN, 0);
-    ets_delay_us(10); //wait 10us DO WE NEED THIS ??
+    //gpio_set_level(CS_PIN, 0);
+    //ets_delay_us(10); //wait 10us DO WE NEED THIS ??
     memset(spi_bytes, 0, sizeof(spi_bytes));
     timestamp_union.timestamp = esp_timer_get_time(); //cave 64bit
     spi_bytes[0] = timestamp_union.timestamp_bytes[0];
@@ -217,7 +217,10 @@ inline void receive_sample()
     spi_bytes[7] = sample_number_union.sample_number_bytes[3];
 
     uint8_t returnCode = spiRec(spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES, num_spi_bytes);
-    gpio_set_level(CS_PIN, 1);
+    
+    //gpio_set_level(CS_PIN, 1);
+    // Oha ...
+
     sample_number_union.sample_number++;
 }
 
@@ -261,6 +264,11 @@ inline void send_sample(void)
         }
         break;
     case TEXT_MODE:
+        if (mpText_mode)
+        {
+        send_sample_messagepack(num_timestamped_spi_bytes);
+        break;
+        }
         if (base64_mode)
         {
             b64len = base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
@@ -280,7 +288,7 @@ inline void send_sample(void)
     }
 }
 
-inline void send_sample_json(int num_bytes)
+/*inline void send_sample_json(int num_bytes)
 {
     cJSON *root;
     root = cJSON_CreateObject();
@@ -288,18 +296,21 @@ inline void send_sample_json(int num_bytes)
     cJSON_AddItemToObject(root, STATUS_TEXT_KEY, cJSON_CreateString(STATUS_TEXT_OK));
     cJSON_AddItemToObject(root, DATA_KEY, cJSON_CreateIntArray((const int *)spi_bytes, num_bytes));
     jsonCommand.sendJsonLinesDocResponse(root);
-}
+}*/
 
 inline void send_samples(void)
 {
-    if (!is_rdatac)
+/*    if (!is_rdatac)
         return;
     if (spi_data_available)
     {
         spi_data_available = 0;
         receive_sample();
         send_sample();
-    }
+    }*/
+        receive_sample();
+        send_sample();
+
 }
 
 void adsSetup()
@@ -309,12 +320,12 @@ void adsSetup()
     spi_data_available = 0;
     //attachInterrupt(digitalPinToInterrupt(IPIN_DRDY), drdy_interrupt, FALLING); done in spi_init
     adcSendCommand(SDATAC);
-
-    //vTaskDelay(1000 / portTICK_PERIOD_MS);
-
-    // delayMicroseconds(2);
+    ESP_LOGI(TAG, "sent SDATAC");
+    //vTaskDelay(100 / portTICK_PERIOD_MS);
+    //ets_delay_us(2);
     //delay(100);
-    int val = adcRreg(ID);
+    uint8_t val = adcRreg(ID);
+    ESP_LOGI(TAG, "ID = %d",val);
     switch (val & DEV_ID_MASK)
     {
     case (DEV_ID_MASK_129x | ID_4CHAN):
@@ -356,9 +367,9 @@ void adsSetup()
         while (1)
         {
             gpio_set_level(LED_PIN, 1);
-            vTaskDelay(50 / portTICK_PERIOD_MS);
+            vTaskDelay(500 / portTICK_PERIOD_MS);
             gpio_set_level(LED_PIN, 0);
-            vTaskDelay(50 / portTICK_PERIOD_MS);
+            vTaskDelay(500 / portTICK_PERIOD_MS);
         }
     } //error mode
 
@@ -366,7 +377,7 @@ void adsSetup()
     adcWreg(ADS_GPIO, 0);
     adcWreg(CONFIG3, PD_REFBUF | CONFIG3_const);
     //gpio_set_level(START_PIN, 1); //Hmmm not sure ??? should be L to use commands ...
-    gpio_set_level(START_PIN, 0); //L to use commands ...
+    //gpio_set_level(START_PIN, 0); //L to use commands ...
 }
 
 void nopCommand(unsigned char unused1, unsigned char unused2)
@@ -531,8 +542,9 @@ void resetCommand(unsigned char unused1, unsigned char unused2)
 {
     using namespace ADS129x;
     adcSendCommand(RESET);
-    send_response_ok();
+    vTaskDelay(150 / portTICK_PERIOD_MS); //now wait 2^18 tCLK = 128ms
     adsSetup();
+    send_response_ok();
 }
 
 void startCommand(unsigned char unused1, unsigned char unused2)
@@ -580,7 +592,7 @@ void rdataCommand(unsigned char unused1, unsigned char unused2)
     using namespace ADS129x;
     while (gpio_get_level(DRDY_PIN) == 1)
         ; //wdt kicks in ...
-    adcSendCommandLeaveCsActive(RDATA);
+    //adcSendCommandLeaveCsActive(RDATA); TBD
     if (protocol_mode == TEXT_MODE)
     {
         send_response_ok();
@@ -691,6 +703,12 @@ void hexModeOnCommand(unsigned char unused1, unsigned char unused2)
     send_response(RESPONSE_OK, "Hex mode on - rdata command will respond with hex encoded data");
 }
 
+void mpTextOnCommand(unsigned char unused1, unsigned char unused2)
+{
+    mpText_mode = true;
+    send_response(RESPONSE_OK, "Hex mode on - rdata command will respond with hex encoded data");
+}
+
 void testCommand(unsigned char unused1, unsigned char unused2)
 {
     using namespace ADS129x;
@@ -724,6 +742,20 @@ void helpCommand(unsigned char unused1, unsigned char unused2)
     }
 }
 
+
+static void rdatac_task(void *arg)
+{
+	while (1)
+	{
+        if (xSemaphoreTake(xSemaphore, portMAX_DELAY) == pdTRUE) //read uart every 10 ms
+        {
+            send_samples();
+            }
+	}
+}
+
+
+
 void app_main(void)
 {
     /*Bootloader config
@@ -734,16 +766,20 @@ Log output
 Default log verbosity
 -->No output*/
     //esp_log_level_set("*", ESP_LOG_INFO); //todo change by command
+    vTaskDelay(500 / portTICK_PERIOD_MS); //wait --> see whether this is OK*/
     esp_log_level_set("*", ESP_LOG_NONE); //todo change by command
     ESP_LOGI(TAG, "Hi");
     uart_init();
     protocol_mode = TEXT_MODE;
     //protocol_mode = JSONLINES_MODE;
     ESP_LOGI(TAG, "UART initialized");
-    spi_init();
+    spi_init();  //start SPI, define semaphore, do GPIO stuff
     ESP_LOGI(TAG, "SPI initialized");
     adsSetup();
     ESP_LOGI(TAG, "ADS1299 initialized");
+
+    xSemaphore = xSemaphoreCreateBinary(); 
+    xTaskCreate(rdatac_task, "rdatac_task", 4096, NULL, 5, NULL); //params?? prio 2 ??
 
     serialCommand.setDefaultHandler(unrecognized);                 //
     serialCommand.addCommand("nop", nopCommand);                   // No operation (does nothing)
@@ -770,6 +806,7 @@ Default log verbosity
     serialCommand.addCommand("wreg", writeRegisterCommand);        // Write ADS129x register, arguments in hex
     serialCommand.addCommand("base64", base64ModeOnCommand);       // RDATA commands send base64 encoded data - default
     serialCommand.addCommand("hex", hexModeOnCommand);             // RDATA commands send hex encoded data
+    serialCommand.addCommand("mp_text", mpTextOnCommand);             // RDATA commands send hex encoded data
     serialCommand.addCommand("test", testCommand);                 // set to square wave enable ch 1 and 3
     serialCommand.addCommand("help", helpCommand);                 // Print list of commands
     serialCommand.clearBuffer();
@@ -815,12 +852,12 @@ Default log verbosity
             ;
         }
 
-        if (xSemaphoreTake(xSemaphore, 10 / portTICK_PERIOD_MS) == pdTRUE) //read uart every 10 ms
+        /*if (xSemaphoreTake(xSemaphore, 10 / portTICK_PERIOD_MS) == pdTRUE) //read uart every 10 ms
         {
             send_samples();
-            }
+            }*/
 
-        /*send_samples();
-        vTaskDelay(10 / portTICK_PERIOD_MS); //wait --> see whether this is OK*/
+        //send_samples();
+        vTaskDelay(10 / portTICK_PERIOD_MS); //wait --> see whether this is OK
     }
 }

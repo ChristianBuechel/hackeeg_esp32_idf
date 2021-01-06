@@ -35,13 +35,19 @@ void uart_init()
 // Hmm uart_tx_chars works with and without tx buffer ... I guess ESP_LOG is dangerous 
 // as a combination ....
 
-void uart_write(char *data, uint8_t len)
+void uart_write(char *data, size_t len)
 {
     int size;
+	char buf[50];
     //size = uart_tx_chars(UART_NUM_0, data, len);
+    size = uart_write_bytes(UART_NUM_0, data, len);
+    int len2 = sprintf(buf, "written %d received %d\n", size,len);
+	//size = uart_tx_chars(UART_NUM_0, buf, len2);
+	size = uart_write_bytes(UART_NUM_0, buf, len2);
+    	
 	//using tx_chars sends only a few bytes, and seems to be blocked by esp_log!!
 	//maybe uart_fill_fifo is interesting in ISR on DRDY L
-    size = uart_write_bytes(UART_NUM_0, data, len);
+    //size = uart_write_bytes(UART_NUM_0, data, len);
     /*if (size > 0)
     {
         ESP_LOGI(TAG, "UART Wrote %d bytes", size);
