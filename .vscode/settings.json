@@ -11,6 +11,7 @@
   "idf.portWin": "COM18",
   "files.associations": {
     "*.pawn": "pawn",
-    "cjson.h": "c"
+    "cjson.h": "c",
+    "algorithm": "cpp"
   }
 }

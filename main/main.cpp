@@ -50,6 +50,26 @@ uint8_t json_rdatac_footer_size = sizeof(json_rdatac_footer);
 const char messagepack_rdatac_header[] = {0x82, 0xa1, 0x43, 0xcc, 0xc8, 0xa1, 0x44, 0xc4};
 uint8_t messagepack_rdatac_header_size = sizeof(messagepack_rdatac_header);
 
+#define MP_HEADER_SZ 8
+#define MP_DATA_SZ 27
+#define MP_FULL_SZ 43
+
+
+union
+{
+    char bytes[MP_FULL_SZ];
+
+    struct
+    {
+        char header[MP_HEADER_SZ];  // messagepack header
+        uint32_t time;   // sample time
+        uint32_t sample; // sample #
+        uint8_t data[MP_DATA_SZ];   // data ((8 ch + 1 status) x 3 bytes )
+        char lf[1];
+    } data_fields;
+
+} mp_transfer;
+
 //int protocol_mode = TEXT_MODE;
 int protocol_mode = JSONLINES_MODE;
 
@@ -217,7 +237,7 @@ inline void receive_sample()
     spi_bytes[7] = sample_number_union.sample_number_bytes[3];
 
     uint8_t returnCode = spiRec(spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES, num_spi_bytes);
-    
+
     //gpio_set_level(CS_PIN, 1);
     // Oha ...
 
@@ -266,8 +286,8 @@ inline void send_sample(void)
     case TEXT_MODE:
         if (mpText_mode)
         {
-        send_sample_messagepack(num_timestamped_spi_bytes);
-        break;
+            send_sample_messagepack(num_timestamped_spi_bytes);
+            break;
         }
         if (base64_mode)
         {
@@ -300,7 +320,7 @@ inline void send_sample(void)
 
 inline void send_samples(void)
 {
-/*    if (!is_rdatac)
+    /*    if (!is_rdatac)
         return;
     if (spi_data_available)
     {
@@ -308,9 +328,8 @@ inline void send_samples(void)
         receive_sample();
         send_sample();
     }*/
-        receive_sample();
-        send_sample();
-
+    receive_sample();
+    send_sample();
 }
 
 void adsSetup()
@@ -325,7 +344,7 @@ void adsSetup()
     //ets_delay_us(2);
     //delay(100);
     uint8_t val = adcRreg(ID);
-    ESP_LOGI(TAG, "ID = %d",val);
+    ESP_LOGI(TAG, "ID = %d", val);
     switch (val & DEV_ID_MASK)
     {
     case (DEV_ID_MASK_129x | ID_4CHAN):
@@ -742,22 +761,44 @@ void helpCommand(unsigned char unused1, unsigned char unused2)
     }
 }
 
-
 static void rdatac_task(void *arg)
 {
-	while (1)
-	{
+    memcpy(mp_transfer.data_fields.header, messagepack_rdatac_header, MP_HEADER_SZ);
+    mp_transfer.data_fields.lf[0] = 0x0a; // put a line feed in
+    uint32_t sample = 0;
+    while (1)
+    {
         if (xSemaphoreTake(xSemaphore, portMAX_DELAY) == pdTRUE) //read uart every 10 ms
         {
-            send_samples();
-            }
-	}
+            //send_samples();
+            //this should be pretty fast
+            gpio_set_level(LED_PIN, 1);
+            ets_delay_us(2); //wait 2us
+            gpio_set_level(LED_PIN, 0);
+
+            mp_transfer.data_fields.time = esp_timer_get_time(); //cave 64bit
+            mp_transfer.data_fields.sample = sample;
+            spiRec(mp_transfer.data_fields.data, MP_DATA_SZ);
+
+            gpio_set_level(LED_PIN, 1);
+            ets_delay_us(2); //wait 2us
+            gpio_set_level(LED_PIN, 0);
+
+            uart_write(mp_transfer.bytes, MP_FULL_SZ);
+            sample++;
+            //flick LED to show we are ready (in scope)
+            //this hould be before DRDY goes low again ...
+            gpio_set_level(LED_PIN, 1);
+            ets_delay_us(2); //wait 2us
+            gpio_set_level(LED_PIN, 0);
+
+        }
+    }
 }
-
-
 
 void app_main(void)
 {
+
     /*Bootloader config
 Bootloader log verbosity
 -->No output
@@ -773,12 +814,12 @@ Default log verbosity
     protocol_mode = TEXT_MODE;
     //protocol_mode = JSONLINES_MODE;
     ESP_LOGI(TAG, "UART initialized");
-    spi_init();  //start SPI, define semaphore, do GPIO stuff
+    spi_init(); //start SPI, define semaphore, do GPIO stuff
     ESP_LOGI(TAG, "SPI initialized");
     adsSetup();
     ESP_LOGI(TAG, "ADS1299 initialized");
 
-    xSemaphore = xSemaphoreCreateBinary(); 
+    xSemaphore = xSemaphoreCreateBinary();
     xTaskCreate(rdatac_task, "rdatac_task", 4096, NULL, 5, NULL); //params?? prio 2 ??
 
     serialCommand.setDefaultHandler(unrecognized);                 //
@@ -806,7 +847,7 @@ Default log verbosity
     serialCommand.addCommand("wreg", writeRegisterCommand);        // Write ADS129x register, arguments in hex
     serialCommand.addCommand("base64", base64ModeOnCommand);       // RDATA commands send base64 encoded data - default
     serialCommand.addCommand("hex", hexModeOnCommand);             // RDATA commands send hex encoded data
-    serialCommand.addCommand("mp_text", mpTextOnCommand);             // RDATA commands send hex encoded data
+    serialCommand.addCommand("mp_text", mpTextOnCommand);          // RDATA commands send hex encoded data
     serialCommand.addCommand("test", testCommand);                 // set to square wave enable ch 1 and 3
     serialCommand.addCommand("help", helpCommand);                 // Print list of commands
     serialCommand.clearBuffer();

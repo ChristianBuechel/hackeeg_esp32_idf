@@ -37,15 +37,18 @@ volatile bool is_rdatac = false;
 
 uint8_t tx_data_NOP[SPI_TRANSFER_SZ] = {0}; //NOPs for receiving data
 
-
 static void IRAM_ATTR drdy_interrupt(void *arg)
 {
     static BaseType_t xHigherPriorityTaskWoken;
     xHigherPriorityTaskWoken = pdFALSE;
     spi_data_available = 1; // will go eventually
     if (is_rdatac)
+    {
+        gpio_set_level(LED_PIN, 1);
+        ets_delay_us(2); //wait 2us
+        gpio_set_level(LED_PIN, 0);
         xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken); //tell rdatac task to run
-
+    }
     if (xHigherPriorityTaskWoken != pdFALSE)
     {
         // We can force a context switch here.  Context switching from an
@@ -55,15 +58,13 @@ static void IRAM_ATTR drdy_interrupt(void *arg)
     }
 }
 
-
-
 #define new
 
 #ifdef old
 
 void spi_init() //probably need to re-init when transfering data at hign speed
 {
-    xSemaphore = xSemaphoreCreateBinary(); 
+    xSemaphore = xSemaphoreCreateBinary();
     //xTaskCreate(&rdatac_task, "rdatac_task", 4096, NULL, 2, NULL); //params?? prio 2 ??
     // at the moment we handle the semaphore in the main loop
     buscfg.mosi_io_num = GPIO_NUM_23;
@@ -113,7 +114,7 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     gpio_set_level(LED_PIN, 0);    // LED off
     gpio_set_level(CLKSEL_PIN, 0); // use external clock
     gpio_set_level(CLKSEL_PIN, 1); // use internal clock like hackeeg
-    gpio_set_level(RESET_PIN, 1); // RESET H
+    gpio_set_level(RESET_PIN, 1);  // RESET H
     //vTaskDelay(100);               //now wait 2^18 tCLK = 128ms (13) but start with 1000ms (100)
     vTaskDelay(1000 / portTICK_PERIOD_MS); //now wait 2^18 tCLK = 128ms (13) but start with 1000ms (100)
     gpio_set_level(RESET_PIN, 0);          // RESET !
@@ -261,9 +262,12 @@ int adcRreg(int reg)
 #endif
 
 #ifdef new
+
+spi_transaction_t Rec_t;
+
 void spi_init() //probably need to re-init when transfering data at hign speed
 {
-    //xSemaphore = xSemaphoreCreateBinary(); 
+    //xSemaphore = xSemaphoreCreateBinary();
     // at the moment we handle the semaphore in the main loop
     buscfg.mosi_io_num = GPIO_NUM_23;
     buscfg.miso_io_num = GPIO_NUM_19;
@@ -277,21 +281,21 @@ void spi_init() //probably need to re-init when transfering data at hign speed
                                               //actually 16K SPS requires < 4 MHz
                                               //however that leaves less time to transmit over UART...
 
-    devcfg.mode = 1;                        //SPI mode 1 p.12 CPOL = 0 and CPHA = 1.
+    devcfg.mode = 1; //SPI mode 1 p.12 CPOL = 0 and CPHA = 1.
     //devcfg.cs_ena_pretrans = 0;             //p.38 ADS1299 data sheet NOT needed if CS driven manaully
     //devcfg.cs_ena_posttrans = 0;            //p.38 ADS1299 data sheet NOT needed if CS driven manaully
-    // 16 meesses up SPI, 4 works 
+    // 16 meesses up SPI, 4 works
     //devcfg.spics_io_num = CS_PIN;        //let esp operate CS pin
-    devcfg.spics_io_num = -1;              //we simply keep CS pin L
-    devcfg.queue_size = 1;                 //only one transactions at a time
+    devcfg.spics_io_num = -1; //we simply keep CS pin L
+    devcfg.queue_size = 1;    //only one transactions at a time
     //devcfg.flags = SPI_DEVICE_HALFDUPLEX;    // try half duplex
-    
+
     gpio_config_t gp;
     gp.intr_type = GPIO_INTR_DISABLE;
     gp.mode = GPIO_MODE_OUTPUT;
     gp.pull_up_en = GPIO_PULLUP_ENABLE;
     gp.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    //gp.pin_bit_mask = (1ULL << RESET_PIN); 
+    //gp.pin_bit_mask = (1ULL << RESET_PIN);
     gp.pin_bit_mask = (1ULL << CS_PIN) | (1ULL << RESET_PIN);
     // if you define this BEFORE starting SPI it is OK ...
     gpio_config(&gp);
@@ -299,7 +303,7 @@ void spi_init() //probably need to re-init when transfering data at hign speed
 
     gp.pull_up_en = GPIO_PULLUP_DISABLE;
     gp.pull_down_en = GPIO_PULLDOWN_ENABLE;
-    gp.pin_bit_mask = (1ULL << CLKSEL_PIN) | (1ULL << START_PIN) | (1ULL << LED_PIN)| (1ULL << GPIO_NUM_19)| (1ULL << GPIO_NUM_23)| (1ULL << GPIO_NUM_18);
+    gp.pin_bit_mask = (1ULL << CLKSEL_PIN) | (1ULL << START_PIN) | (1ULL << LED_PIN) | (1ULL << GPIO_NUM_19) | (1ULL << GPIO_NUM_23) | (1ULL << GPIO_NUM_18);
     gpio_config(&gp);
     ESP_LOGI(TAG, "CLKSEL START LED_PIN init done");
 
@@ -316,22 +320,22 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     ESP_LOGI(TAG, "DRDY_PIN ISR Installed");
 
     //startup p.62
-    gpio_set_level(LED_PIN, 0);    // LED off
+    gpio_set_level(LED_PIN, 0); // LED off
     //gpio_set_level(CLKSEL_PIN, 0); // use external clock
     gpio_set_level(CLKSEL_PIN, 1); // use internal clock like hackeeg
-    gpio_set_level(START_PIN, 1); // start
+    gpio_set_level(START_PIN, 1);  // start
 
     gpio_set_level(RESET_PIN, 1); // RESET H
 
     vTaskDelay(130 / portTICK_PERIOD_MS); //now wait 2^18 tCLK = 128ms
-    gpio_set_level(RESET_PIN, 0);          // RESET !
-    ets_delay_us(10);                      //2 tCLK = 0.9 us
-    gpio_set_level(RESET_PIN, 1);          // done
+    gpio_set_level(RESET_PIN, 0);         // RESET !
+    ets_delay_us(10);                     //2 tCLK = 0.9 us
+    gpio_set_level(RESET_PIN, 1);         // done
 
     gpio_set_level(START_PIN, 0); // control by command
 
-    // we simply work w/o a CS pulse and keep line L 
-    gpio_set_level(CS_PIN, 0);          // forever
+    // we simply work w/o a CS pulse and keep line L
+    gpio_set_level(CS_PIN, 0); // forever
 
     ESP_LOGI(TAG, "set various GPIOs");
 
@@ -341,7 +345,11 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     spi_bus_add_device(VSPI_HOST, &devcfg, &spi);
     ESP_LOGI(TAG, "after spi_bus_add_device");
 
-
+    spi_device_acquire_bus(spi, portMAX_DELAY); //could speed things up as we are the only customers
+    // predefine makes no difference
+    memset(&Rec_t, 0, sizeof(Rec_t));
+    Rec_t.tx_buffer = tx_data_NOP; // sending zeros !!
+    Rec_t.flags = 0;
 }
 
 /** SPI receive a byte */
@@ -360,14 +368,22 @@ uint8_t spiRec()
 /** SPI receive multiple bytes */
 uint8_t spiRec(uint8_t *buf, uint8_t len)
 {
-    spi_transaction_t t;
+    // you could predefine the transaction to speed things up ...
+    /*spi_transaction_t t;
     memset(&t, 0, sizeof(t));
     t.length = 8 * len;
     t.rx_buffer = buf;
     t.tx_buffer = tx_data_NOP; // sending zeros !!
     t.flags = 0;
-    spi_device_polling_transmit(spi, &t);
+    spi_device_polling_transmit(spi, &t);*/
     //spi_device_transmit(spi, &t);
+
+    Rec_t.length = 8 * len;
+    Rec_t.rx_buffer = buf;
+    //spi_device_polling_transmit(spi, &Rec_t); //faster 52us @ 10 MHz
+    spi_device_polling_start(spi, &Rec_t, portMAX_DELAY); //faster 52us @ 10 MHz
+    spi_device_polling_end(spi, portMAX_DELAY);
+    //spi_device_transmit(spi, &Rec_t); //very slow 86us @ 10 MHz
     return 0;
 }
 
@@ -375,8 +391,8 @@ uint8_t spiRec(uint8_t *buf, uint8_t len)
 void spiSend(uint8_t b)
 {
     spi_transaction_t t;
-    memset(&t, 0, sizeof(t));             //Zero out the transaction
-    t.length = 8;                         //Command is 8 bits
+    memset(&t, 0, sizeof(t)); //Zero out the transaction
+    t.length = 8;             //Command is 8 bits
     t.tx_data[0] = b;
     t.flags = SPI_TRANS_USE_TXDATA;
     spi_device_polling_transmit(spi, &t); //Transmit!
@@ -396,13 +412,12 @@ void adcSendCommand(uint8_t cmd)
 {
     ESP_LOGI(TAG, "adcSendCommand");
     spi_transaction_t t;
-    memset(&t, 0, sizeof(t));       //Zero out the transaction
-    t.length=8;                     //Command is 8 bits
+    memset(&t, 0, sizeof(t)); //Zero out the transaction
+    t.length = 8;             //Command is 8 bits
     t.tx_data[0] = cmd;
     t.flags = SPI_TRANS_USE_TXDATA;
-    spi_device_polling_transmit(spi, &t);  //Transmit!     
+    spi_device_polling_transmit(spi, &t); //Transmit!
 }
-
 
 void adcWreg(uint8_t reg, uint8_t val)
 {
