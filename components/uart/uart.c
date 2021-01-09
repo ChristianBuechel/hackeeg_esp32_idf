@@ -21,15 +21,17 @@ void uart_init()
 {	uart_config_t uart_config = {
 		//.baud_rate = 115200,
 		//.baud_rate = 921600,
+		//.baud_rate = 2000000,
 		.baud_rate = 3000000,
 		.data_bits = UART_DATA_8_BITS,
 		.parity = UART_PARITY_DISABLE,
 		.stop_bits = UART_STOP_BITS_1,
+		//.flow_ctrl = UART_HW_FLOWCTRL_RTS}; //dows not make a diff for driver.py
 		.flow_ctrl = UART_HW_FLOWCTRL_DISABLE};
 	uart_param_config(UART_NUM_0, &uart_config);
 	uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-	//uart_driver_install(UART_NUM_0, uart_buffer_size, 0, 0, NULL, 0); //no TX buffer??
-	uart_driver_install(UART_NUM_0, uart_buffer_size, uart_buffer_size, 0, NULL, 0); //with TX buffer??
+	uart_driver_install(UART_NUM_0, uart_buffer_size, 0, 0, NULL, 0); //no TX buffer??
+	//uart_driver_install(UART_NUM_0, uart_buffer_size, uart_buffer_size, 0, NULL, 0); //with TX buffer??
 }
 
 // Hmm uart_tx_chars works with and without tx buffer ... I guess ESP_LOG is dangerous 
@@ -41,6 +43,8 @@ void uart_write(char *data, size_t len)
 	//char buf[50];
     
 	size = uart_tx_chars(UART_NUM_0, data, len);
+
+	//uart_wait_tx_done(UART_NUM_0, portMAX_DELAY);
     //size = uart_write_bytes(UART_NUM_0, data, len);
     //int len2 = sprintf(buf, "written %d received %d\n", size,len);
 	//size = uart_tx_chars(UART_NUM_0, buf, len2);

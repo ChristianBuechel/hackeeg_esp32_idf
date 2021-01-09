@@ -43,6 +43,8 @@ const char *maker_name = "Buchels";
 const char *driver_version = "v0.1";
 
 const char *json_rdatac_header = "{\"C\":200,\"D\":\"";
+//const char *json_rdatac_header = "{\"X\":200,\"D\":\""; //just to check
+
 uint8_t json_rdatac_header_size = sizeof(json_rdatac_header);
 const char *json_rdatac_footer = "\"}";
 uint8_t json_rdatac_footer_size = sizeof(json_rdatac_footer);
@@ -52,20 +54,20 @@ uint8_t messagepack_rdatac_header_size = sizeof(messagepack_rdatac_header);
 
 #define MP_HEADER_SZ 8
 #define MP_DATA_SZ 27
-#define MP_FULL_SZ 43
+#define MP_FULL_SZ 44
 
 
 union
 {
     char bytes[MP_FULL_SZ];
 
-    struct
+    struct __attribute__((packed))
     {
         char header[MP_HEADER_SZ];  // messagepack header
+        uint8_t size;    // size of cargo ie MP_DATA_SZ + 4 + 4
         uint32_t time;   // sample time
         uint32_t sample; // sample #
         uint8_t data[MP_DATA_SZ];   // data ((8 ch + 1 status) x 3 bytes )
-        char lf[1];
     } data_fields;
 
 } mp_transfer;
@@ -80,7 +82,6 @@ int num_spi_bytes = 0;
 int num_timestamped_spi_bytes = 0;
 
 bool base64_mode = true;
-bool mpText_mode = false;
 int b64len = 0;
 int hexlen = 0;
 
@@ -284,11 +285,6 @@ inline void send_sample(void)
         }
         break;
     case TEXT_MODE:
-        if (mpText_mode)
-        {
-            send_sample_messagepack(num_timestamped_spi_bytes);
-            break;
-        }
         if (base64_mode)
         {
             b64len = base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
@@ -587,9 +583,9 @@ void rdatacCommand(unsigned char unused1, unsigned char unused2)
     detectActiveChannels();
     if (num_active_channels > 0)
     {
-        is_rdatac = true;
         adcSendCommand(RDATAC);
         send_response_ok();
+        is_rdatac = true;
     }
     else
     {
@@ -609,9 +605,8 @@ void sdatacCommand(unsigned char unused1, unsigned char unused2)
 void rdataCommand(unsigned char unused1, unsigned char unused2)
 {
     using namespace ADS129x;
-    while (gpio_get_level(DRDY_PIN) == 1)
-        ; //wdt kicks in ...
-    //adcSendCommandLeaveCsActive(RDATA); TBD
+    while (gpio_get_level(DRDY_PIN) == 1); //wdt kicks in ...
+    adcSendCommand(RDATA); 
     if (protocol_mode == TEXT_MODE)
     {
         send_response_ok();
@@ -722,11 +717,6 @@ void hexModeOnCommand(unsigned char unused1, unsigned char unused2)
     send_response(RESPONSE_OK, "Hex mode on - rdata command will respond with hex encoded data");
 }
 
-void mpTextOnCommand(unsigned char unused1, unsigned char unused2)
-{
-    mpText_mode = true;
-    send_response(RESPONSE_OK, "Hex mode on - rdata command will respond with hex encoded data");
-}
 
 void testCommand(unsigned char unused1, unsigned char unused2)
 {
@@ -764,7 +754,7 @@ void helpCommand(unsigned char unused1, unsigned char unused2)
 static void rdatac_task(void *arg)
 {
     memcpy(mp_transfer.data_fields.header, messagepack_rdatac_header, MP_HEADER_SZ);
-    mp_transfer.data_fields.lf[0] = 0x0a; // put a line feed in
+    mp_transfer.data_fields.size = MP_DATA_SZ + 4 + 4;
     uint32_t sample = 0;
     while (1)
     {
@@ -772,26 +762,27 @@ static void rdatac_task(void *arg)
         {
             //send_samples();
             //this should be pretty fast
-            gpio_set_level(LED_PIN, 1);
+            /*gpio_set_level(LED_PIN, 1);
             ets_delay_us(2); //wait 2us
-            gpio_set_level(LED_PIN, 0);
+            gpio_set_level(LED_PIN, 0);*/
 
             mp_transfer.data_fields.time = esp_timer_get_time(); //cave 64bit
             mp_transfer.data_fields.sample = sample;
             spiRec(mp_transfer.data_fields.data, MP_DATA_SZ);
 
-            gpio_set_level(LED_PIN, 1);
+            /*gpio_set_level(LED_PIN, 1);
             ets_delay_us(2); //wait 2us
-            gpio_set_level(LED_PIN, 0);
+            gpio_set_level(LED_PIN, 0);*/
 
             uart_write(mp_transfer.bytes, MP_FULL_SZ);
             sample++;
+            spi_data_available = 0;
             //flick LED to show we are ready (in scope)
             //this hould be before DRDY goes low again ...
-            gpio_set_level(LED_PIN, 1);
+            
+            /*gpio_set_level(LED_PIN, 1);
             ets_delay_us(2); //wait 2us
-            gpio_set_level(LED_PIN, 0);
-
+            gpio_set_level(LED_PIN, 0);*/
         }
     }
 }
@@ -847,7 +838,6 @@ Default log verbosity
     serialCommand.addCommand("wreg", writeRegisterCommand);        // Write ADS129x register, arguments in hex
     serialCommand.addCommand("base64", base64ModeOnCommand);       // RDATA commands send base64 encoded data - default
     serialCommand.addCommand("hex", hexModeOnCommand);             // RDATA commands send hex encoded data
-    serialCommand.addCommand("mp_text", mpTextOnCommand);          // RDATA commands send hex encoded data
     serialCommand.addCommand("test", testCommand);                 // set to square wave enable ch 1 and 3
     serialCommand.addCommand("help", helpCommand);                 // Print list of commands
     serialCommand.clearBuffer();
