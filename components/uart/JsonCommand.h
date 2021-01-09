@@ -42,7 +42,6 @@
 #define RESPONSE_NO_ACTIVE_CHANNELS 502
 
 
-
 extern const char *COMMAND_KEY;
 extern const char *PARAMETERS_KEY;
 extern const char *STATUS_CODE_KEY;

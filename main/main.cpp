@@ -42,19 +42,20 @@ const char *board_name = "ADS1299 EVM";
 const char *maker_name = "Buchels";
 const char *driver_version = "v0.1";
 
-const char *json_rdatac_header = "{\"C\":200,\"D\":\"";
-//const char *json_rdatac_header = "{\"X\":200,\"D\":\""; //just to check
-
+const char json_rdatac_header[] = "{\"C\":200,\"D\":\"";
 uint8_t json_rdatac_header_size = sizeof(json_rdatac_header);
-const char *json_rdatac_footer = "\"}";
+//uint8_t json_rdatac_header_size = sizeof (&json_rdatac_header[0]);
+
+const char json_rdatac_footer[] = "\"}";
 uint8_t json_rdatac_footer_size = sizeof(json_rdatac_footer);
+//uint8_t json_rdatac_footer_size = sizeof (&json_rdatac_footer[0]);
 
 const char messagepack_rdatac_header[] = {0x82, 0xa1, 0x43, 0xcc, 0xc8, 0xa1, 0x44, 0xc4};
 uint8_t messagepack_rdatac_header_size = sizeof(messagepack_rdatac_header);
 
 #define MP_HEADER_SZ 8
 #define MP_DATA_SZ 27
-#define MP_FULL_SZ 44
+#define MP_FULL_SZ 44 //8 + 4 + 4 + 1 + 27
 
 
 union
@@ -63,14 +64,30 @@ union
 
     struct __attribute__((packed))
     {
-        char header[MP_HEADER_SZ];  // messagepack header
-        uint8_t size;    // size of cargo ie MP_DATA_SZ + 4 + 4
-        uint32_t time;   // sample time
-        uint32_t sample; // sample #
-        uint8_t data[MP_DATA_SZ];   // data ((8 ch + 1 status) x 3 bytes )
+        char header[MP_HEADER_SZ]; // messagepack header
+        uint8_t size;              // size of cargo ie MP_DATA_SZ + 4 + 4
+        uint32_t time;             // sample time
+        uint32_t sample;           // sample #
+        uint8_t data[MP_DATA_SZ];  // data ((8 ch + 1 status) x 3 bytes )
     } data_fields;
-
 } mp_transfer;
+
+#define SPI_FULL_SZ 35 // MP_DATA_SZ + 4 + 4
+
+union
+{
+    char bytes[SPI_FULL_SZ];
+
+    struct __attribute__((packed))
+    {
+        uint32_t time;             // sample time
+        uint32_t sample;           // sample #
+        uint8_t data[MP_DATA_SZ];  // data ((8 ch + 1 status) x 3 bytes )
+    } data_fields;
+} spi_transfer;
+
+// do the same for b64 package anh hex package --> very nice ...
+// but check whether data strings always have same length
 
 //int protocol_mode = TEXT_MODE;
 int protocol_mode = JSONLINES_MODE;
@@ -78,6 +95,7 @@ int protocol_mode = JSONLINES_MODE;
 int max_channels = 0;
 int num_active_channels = 0;
 bool active_channels[9]; // reports whether channels 1..9 are active
+
 int num_spi_bytes = 0;
 int num_timestamped_spi_bytes = 0;
 
@@ -93,21 +111,6 @@ uint8_t spi_bytes[SPI_BUFFER_SIZE];
 char output_buffer[OUTPUT_BUFFER_SIZE];
 char temp_buffer[OUTPUT_BUFFER_SIZE];
 
-// microseconds timestamp
-#define TIMESTAMP_SIZE_IN_BYTES 4
-union
-{
-    char timestamp_bytes[TIMESTAMP_SIZE_IN_BYTES];
-    unsigned long timestamp;
-} timestamp_union;
-
-// sample number counter
-#define SAMPLE_NUMBER_SIZE_IN_BYTES 4
-union
-{
-    char sample_number_bytes[SAMPLE_NUMBER_SIZE_IN_BYTES];
-    unsigned long sample_number = 0;
-} sample_number_union;
 
 SerialCommand serialCommand; // The  SerialCommand object
 JsonCommand jsonCommand;
@@ -147,10 +150,9 @@ int encode_hex(char *output, char *input, int input_len)
 }
 
 void detectActiveChannels()
-{ //set device into RDATAC (continous) mode -it will stream data
+{
     if ((is_rdatac) || (max_channels < 1))
         return; //we can not read registers when in RDATAC mode
-    //Serial.println("Detect active channels: ");
     using namespace ADS129x;
     num_active_channels = 0;
     for (int i = 1; i <= max_channels; i++)
@@ -222,118 +224,16 @@ void unrecognizedJsonLines(const char *command)
     jsonCommand.sendJsonLinesDocResponse(root); //als Alternative
 }
 
-inline void receive_sample()
-{ //inline necessary ??
-    //gpio_set_level(CS_PIN, 0);
-    //ets_delay_us(10); //wait 10us DO WE NEED THIS ??
-    memset(spi_bytes, 0, sizeof(spi_bytes));
-    timestamp_union.timestamp = esp_timer_get_time(); //cave 64bit
-    spi_bytes[0] = timestamp_union.timestamp_bytes[0];
-    spi_bytes[1] = timestamp_union.timestamp_bytes[1];
-    spi_bytes[2] = timestamp_union.timestamp_bytes[2];
-    spi_bytes[3] = timestamp_union.timestamp_bytes[3];
-    spi_bytes[4] = sample_number_union.sample_number_bytes[0];
-    spi_bytes[5] = sample_number_union.sample_number_bytes[1];
-    spi_bytes[6] = sample_number_union.sample_number_bytes[2];
-    spi_bytes[7] = sample_number_union.sample_number_bytes[3];
-
-    uint8_t returnCode = spiRec(spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES, num_spi_bytes);
-
-    //gpio_set_level(CS_PIN, 1);
-    // Oha ...
-
-    sample_number_union.sample_number++;
-}
-
-inline void send_sample_messagepack(int num_bytes)
-{
-    /*uart_write((char *)messagepack_rdatac_header, messagepack_rdatac_header_size);
-    uart_write((char *)&num_bytes, 1);
-    uart_write((char *)spi_bytes, num_bytes);*/
-
-    size_t count = 0;
-    memcpy(&output_buffer[count], messagepack_rdatac_header, messagepack_rdatac_header_size);
-    count += messagepack_rdatac_header_size;
-    output_buffer[count++] = (char)num_bytes;
-    memcpy(&output_buffer[count], spi_bytes, num_bytes);
-    count += num_bytes;
-    output_buffer[count++] = 0x0a;
-    uart_write((char *)output_buffer, count);
-}
-
-inline void send_sample(void)
-{
-    switch (protocol_mode)
-    {
-    case JSONLINES_MODE:
-        /*printf("%s", json_rdatac_header);
-        base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
-        printf("%s", output_buffer);
-        printf("%s\n", json_rdatac_footer);
-        break;*/
-        {
-            b64len = base64_encode(temp_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
-            size_t count = 0;
-            memcpy(&output_buffer[count], json_rdatac_header, json_rdatac_header_size);
-            count += json_rdatac_header_size;
-            memcpy(&output_buffer[count], temp_buffer, b64len);
-            count += b64len;
-            memcpy(&output_buffer[count], json_rdatac_footer, json_rdatac_footer_size);
-            count += json_rdatac_footer_size;
-            output_buffer[count++] = 0x0a;
-            uart_write((char *)output_buffer, count);
-        }
-        break;
-    case TEXT_MODE:
-        if (base64_mode)
-        {
-            b64len = base64_encode(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
-        }
-        else
-        {
-            b64len = encode_hex(output_buffer, (char *)spi_bytes, num_timestamped_spi_bytes);
-        }
-        //printf("%s\n", output_buffer);
-        output_buffer[b64len++] = 0x0a; //add newline
-        uart_write((char *)output_buffer, b64len);
-
-        break;
-    case MESSAGEPACK_MODE:
-        send_sample_messagepack(num_timestamped_spi_bytes);
-        break;
-    }
-}
-
-/*inline void send_sample_json(int num_bytes)
-{
-    cJSON *root;
-    root = cJSON_CreateObject();
-    cJSON_AddItemToObject(root, STATUS_CODE_KEY, cJSON_CreateNumber(STATUS_OK));
-    cJSON_AddItemToObject(root, STATUS_TEXT_KEY, cJSON_CreateString(STATUS_TEXT_OK));
-    cJSON_AddItemToObject(root, DATA_KEY, cJSON_CreateIntArray((const int *)spi_bytes, num_bytes));
-    jsonCommand.sendJsonLinesDocResponse(root);
-}*/
-
-inline void send_samples(void)
-{
-    /*    if (!is_rdatac)
-        return;
-    if (spi_data_available)
-    {
-        spi_data_available = 0;
-        receive_sample();
-        send_sample();
-    }*/
-    receive_sample();
-    send_sample();
-}
 
 void adsSetup()
 { //default settings for ADS1298 and compatible chips
     using namespace ADS129x;
     // Send SDATAC Command (Stop Read Data Continuously mode)
-    spi_data_available = 0;
-    //attachInterrupt(digitalPinToInterrupt(IPIN_DRDY), drdy_interrupt, FALLING); done in spi_init
+    //spi_data_available = 0;
+
+    current_sample = 0;
+    handling_data = false;
+
     adcSendCommand(SDATAC);
     ESP_LOGI(TAG, "sent SDATAC");
     //vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -375,8 +275,6 @@ void adsSetup()
     default:
         max_channels = 0;
     }
-    num_spi_bytes = (3 * (max_channels + 1)); //24-bits header plus 24-bits per channel
-    num_timestamped_spi_bytes = num_spi_bytes + TIMESTAMP_SIZE_IN_BYTES + SAMPLE_NUMBER_SIZE_IN_BYTES;
     if (max_channels == 0)
     { //error mode
         while (1)
@@ -406,7 +304,6 @@ void microsCommand(unsigned char unused1, unsigned char unused2)
     if (protocol_mode == TEXT_MODE)
     {
         send_response_ok();
-        //Serial.println(microseconds);
         printf("%" PRId64 "\n", microseconds);
         return;
     }
@@ -418,8 +315,7 @@ void microsCommand(unsigned char unused1, unsigned char unused2)
     cJSON_AddItemToObject(root, STATUS_CODE_KEY, cJSON_CreateNumber(STATUS_OK));
     cJSON_AddItemToObject(root, STATUS_TEXT_KEY, cJSON_CreateString(STATUS_TEXT_OK));
     cJSON_AddItemToObject(root, DATA_KEY, cJSON_CreateNumber(microseconds));
-    //printf("%s\n", cJSON_Print(root));
-    //cJSON_Delete(root);
+
     switch (protocol_mode)
     {
     case JSONLINES_MODE:
@@ -515,13 +411,12 @@ void ledOffCommand(unsigned char unused1, unsigned char unused2)
 
 void boardLedOnCommand(unsigned char unused1, unsigned char unused2)
 {
-    int state = adcRreg(ADS129x::ADS_GPIO);
-    ESP_LOGI(TAG, "State after read %#x", state);
+    uint8_t state = adcRreg(ADS129x::ADS_GPIO);
     //state = state & 0xF7; --> was all done for GPIO4 we now use GPIO1
     state = state & ~ADS129x::GPIO_bits::GPIOC1; //set pin to OUTPUT
     //state = state | 0x80;
     state = state | ADS129x::GPIO_bits::GPIOD1; //set GPIO Pin
-    ESP_LOGI(TAG, "State before write %#x", state);
+
     adcWreg(ADS129x::ADS_GPIO, state);
 
     send_response_ok();
@@ -529,7 +424,7 @@ void boardLedOnCommand(unsigned char unused1, unsigned char unused2)
 
 void boardLedOffCommand(unsigned char unused1, unsigned char unused2)
 {
-    int state = adcRreg(ADS129x::ADS_GPIO);
+    uint8_t state = adcRreg(ADS129x::ADS_GPIO);
     ESP_LOGI(TAG, "State after read %#x", state);
     //state = state & 0x77;
     state = state & ~(ADS129x::GPIO_bits::GPIOC1 | ADS129x::GPIO_bits::GPIOD1);
@@ -566,7 +461,7 @@ void startCommand(unsigned char unused1, unsigned char unused2)
 {
     using namespace ADS129x;
     adcSendCommand(START);
-    sample_number_union.sample_number = 0;
+    current_sample = 0;
     send_response_ok();
 }
 
@@ -585,7 +480,9 @@ void rdatacCommand(unsigned char unused1, unsigned char unused2)
     {
         adcSendCommand(RDATAC);
         send_response_ok();
-        is_rdatac = true;
+        handling_data = false; //fresh start
+        current_sample = 0;    //here or whe start commad is issued?
+        is_rdatac = true;      //now ISR is armed ...
     }
     else
     {
@@ -605,13 +502,15 @@ void sdatacCommand(unsigned char unused1, unsigned char unused2)
 void rdataCommand(unsigned char unused1, unsigned char unused2)
 {
     using namespace ADS129x;
-    while (gpio_get_level(DRDY_PIN) == 1); //wdt kicks in ...
-    adcSendCommand(RDATA); 
+    while (gpio_get_level(DRDY_PIN) == 1)
+        ; //wdt kicks in ...
+    adcSendCommand(RDATA);
     if (protocol_mode == TEXT_MODE)
     {
         send_response_ok();
     }
-    send_sample();
+    //send_sample(); TBD --> not implemented ...
+
 }
 
 void readRegisterCommand(unsigned char unused1, unsigned char unused2)
@@ -676,6 +575,7 @@ void readRegisterCommandDirect(unsigned char register_number, unsigned char unus
 {
     using namespace ADS129x;
     if (register_number >= 0 and register_number <= 255)
+    // this needs to checked in JSON decoding !!!
     {
         unsigned char result = adcRreg(register_number);
 
@@ -695,6 +595,7 @@ void readRegisterCommandDirect(unsigned char register_number, unsigned char unus
 void writeRegisterCommandDirect(unsigned char register_number, unsigned char register_value)
 {
     if (register_number >= 0 && register_value >= 0)
+    // this needs to checked in JSON decoding !!!
     {
         adcWreg(register_number, register_value);
         send_response_ok();
@@ -717,13 +618,11 @@ void hexModeOnCommand(unsigned char unused1, unsigned char unused2)
     send_response(RESPONSE_OK, "Hex mode on - rdata command will respond with hex encoded data");
 }
 
-
 void testCommand(unsigned char unused1, unsigned char unused2)
 {
     using namespace ADS129x;
     adcSendCommand(START);
-    sample_number_union.sample_number = 0;
-
+    current_sample = 0;
     adcWreg(ADS129x::CONFIG2, (CONFIG2_const | INT_TEST_4HZ));
     adcWreg(ADS129x::CH1SET, TEST_SIGNAL);
     adcWreg(ADS129x::CH2SET, SHORTED);
@@ -754,35 +653,77 @@ void helpCommand(unsigned char unused1, unsigned char unused2)
 static void rdatac_task(void *arg)
 {
     memcpy(mp_transfer.data_fields.header, messagepack_rdatac_header, MP_HEADER_SZ);
+    // setup header bytes
     mp_transfer.data_fields.size = MP_DATA_SZ + 4 + 4;
-    uint32_t sample = 0;
+    // setup size (data + counter + time )
+
     while (1)
     {
-        if (xSemaphoreTake(xSemaphore, portMAX_DELAY) == pdTRUE) //read uart every 10 ms
+        // wait for ISR to wake us ...
+        if (xSemaphoreTake(xSemaphore, portMAX_DELAY) == pdTRUE)
         {
-            //send_samples();
-            //this should be pretty fast
-            /*gpio_set_level(LED_PIN, 1);
+            switch (protocol_mode)
+            {
+            case MESSAGEPACK_MODE:
+            {
+                //this should be pretty fast
+                mp_transfer.data_fields.time = esp_timer_get_time(); //cave 64bit
+                mp_transfer.data_fields.sample = current_sample;
+                spiRec(mp_transfer.data_fields.data, MP_DATA_SZ);
+                uart_write(mp_transfer.bytes, MP_FULL_SZ);
+                /*gpio_set_level(LED_PIN, 1);
             ets_delay_us(2); //wait 2us
             gpio_set_level(LED_PIN, 0);*/
+            }
+            break;
 
-            mp_transfer.data_fields.time = esp_timer_get_time(); //cave 64bit
-            mp_transfer.data_fields.sample = sample;
-            spiRec(mp_transfer.data_fields.data, MP_DATA_SZ);
+            case JSONLINES_MODE:
+            {
+                spi_transfer.data_fields.time = esp_timer_get_time(); //cave 64bit
+                spi_transfer.data_fields.sample = current_sample;
+                spiRec(spi_transfer.data_fields.data, MP_DATA_SZ);
 
-            /*gpio_set_level(LED_PIN, 1);
-            ets_delay_us(2); //wait 2us
-            gpio_set_level(LED_PIN, 0);*/
+                b64len = base64_encode(temp_buffer, spi_transfer.bytes, SPI_FULL_SZ);
+                size_t count = 0;
+                memcpy(&output_buffer[count], json_rdatac_header, json_rdatac_header_size);
+                count += json_rdatac_header_size;
+                //memcpy(&output_buffer[count], json_rdatac_header, 14);
+                //count += 14;
 
-            uart_write(mp_transfer.bytes, MP_FULL_SZ);
-            sample++;
-            spi_data_available = 0;
-            //flick LED to show we are ready (in scope)
-            //this hould be before DRDY goes low again ...
-            
-            /*gpio_set_level(LED_PIN, 1);
-            ets_delay_us(2); //wait 2us
-            gpio_set_level(LED_PIN, 0);*/
+                memcpy(&output_buffer[count], temp_buffer, b64len);
+                count += b64len;
+                
+                memcpy(&output_buffer[count], json_rdatac_footer, json_rdatac_footer_size);
+                count += json_rdatac_footer_size;
+                //memcpy(&output_buffer[count], json_rdatac_footer, 2);
+                //count += 2;
+                output_buffer[count++] = 0x0a;
+                uart_write((char *)output_buffer, count);
+            }
+            break;
+
+            case TEXT_MODE:
+            {
+                spi_transfer.data_fields.time = esp_timer_get_time(); //cave 64bit
+                spi_transfer.data_fields.sample = current_sample;
+                spiRec(spi_transfer.data_fields.data, MP_DATA_SZ);
+                if (base64_mode)
+                {
+                    b64len = base64_encode(output_buffer, spi_transfer.bytes, SPI_FULL_SZ);
+                }
+                else
+                {
+                    b64len = encode_hex(output_buffer, spi_transfer.bytes, SPI_FULL_SZ);
+                }
+                output_buffer[b64len++] = 0x0a; //add newline
+                uart_write((char *)output_buffer, b64len);
+            }
+            break;
+
+            default:
+                break;
+            }
+            handling_data = false; //we are done
         }
     }
 }
@@ -882,13 +823,6 @@ Default log verbosity
             // do nothing
             ;
         }
-
-        /*if (xSemaphoreTake(xSemaphore, 10 / portTICK_PERIOD_MS) == pdTRUE) //read uart every 10 ms
-        {
-            send_samples();
-            }*/
-
-        //send_samples();
-        vTaskDelay(10 / portTICK_PERIOD_MS); //wait --> see whether this is OK
+        vTaskDelay(10 / portTICK_PERIOD_MS); //UART input gets handled every 10 ms ...
     }
 }

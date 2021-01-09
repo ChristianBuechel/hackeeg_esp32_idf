@@ -32,8 +32,9 @@ spi_device_handle_t spi;
 
 SemaphoreHandle_t xSemaphore = NULL;
 
-volatile uint8_t spi_data_available;
 volatile bool is_rdatac = false;
+volatile uint32_t current_sample = 0;
+volatile bool handling_data = false;
 
 uint8_t tx_data_NOP[SPI_TRANSFER_SZ] = {0}; //NOPs for receiving data
 
@@ -41,16 +42,21 @@ static void IRAM_ATTR drdy_interrupt(void *arg)
 {
     static BaseType_t xHigherPriorityTaskWoken;
     xHigherPriorityTaskWoken = pdFALSE;
-    if (is_rdatac)
+    if (is_rdatac) //get ino ISR only in rdatac mode
     {
-        spi_data_available++;
-        if (spi_data_available > 1) // means we have not yet sent the data 
+        //spi_data_available++;
+        current_sample++; //even if there is a collison count up
+        if (!handling_data) // means we have sent the last data
+        {
+            xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken); //tell rdatac task to run
+            handling_data = true;
+        }
+        else
         {
             gpio_set_level(LED_PIN, 1);
-            ets_delay_us(spi_data_available); //
+            ets_delay_us(2);   // signal collison on scope
             gpio_set_level(LED_PIN, 0);
         }
-        xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken); //tell rdatac task to run
     }
     if (xHigherPriorityTaskWoken != pdFALSE)
     {
@@ -72,12 +78,12 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     buscfg.sclk_io_num = GPIO_NUM_18;
     buscfg.quadwp_io_num = -1;
     buscfg.quadhd_io_num = -1;
-    buscfg.max_transfer_sz = SPI_TRANSFER_SZ; // 64 should be enough
+    buscfg.max_transfer_sz = SPI_TRANSFER_SZ; // 64 is plenty
 
     devcfg.clock_speed_hz = 20 * 1000 * 1000; //Using 4 MHz mean we can send multibyte stuff in one go
                                               //in theory we can change that for data transfer
                                               //actually 16K SPS requires < 4 MHz
-                                              //however that leaves less time to transmit over UART...
+                                              //however that leaves not enough time to transmit over UART...
 
     devcfg.mode = 1; //SPI mode 1 p.12 CPOL = 0 and CPHA = 1.
     //devcfg.cs_ena_pretrans = 0;             //p.38 ADS1299 data sheet NOT needed if CS driven manaully
@@ -125,9 +131,9 @@ void spi_init() //probably need to re-init when transfering data at hign speed
 
     gpio_set_level(RESET_PIN, 1); // RESET H
 
-    vTaskDelay(130 / portTICK_PERIOD_MS); //now wait 2^18 tCLK = 128ms
+    vTaskDelay(130 / portTICK_PERIOD_MS); // now wait 2^18 tCLK = 128ms
     gpio_set_level(RESET_PIN, 0);         // RESET !
-    ets_delay_us(10);                     //2 tCLK = 0.9 us
+    ets_delay_us(10);                     // >2 tCLK = 0.9 us
     gpio_set_level(RESET_PIN, 1);         // done
 
     gpio_set_level(START_PIN, 0); // control by command
@@ -144,7 +150,8 @@ void spi_init() //probably need to re-init when transfering data at hign speed
     ESP_LOGI(TAG, "after spi_bus_add_device");
 
     spi_device_acquire_bus(spi, portMAX_DELAY); //could speed things up as we are the only customers
-    // predefine makes no difference
+
+    // predefine makes no big difference
     memset(&Rec_t, 0, sizeof(Rec_t));
     Rec_t.tx_buffer = tx_data_NOP; // sending zeros !!
     Rec_t.flags = 0;
@@ -159,7 +166,6 @@ uint8_t spiRec()
     t.tx_data[0] = 0;
     t.flags = (SPI_TRANS_USE_RXDATA | SPI_TRANS_USE_TXDATA);
     spi_device_polling_transmit(spi, &t);
-    //return *(uint8_t *)t.rx_data;
     return t.rx_data[0];
 }
 
@@ -208,7 +214,6 @@ void spiSend(uint8_t *buf, uint8_t len)
 
 void adcSendCommand(uint8_t cmd)
 {
-    ESP_LOGI(TAG, "adcSendCommand");
     spi_transaction_t t;
     memset(&t, 0, sizeof(t)); //Zero out the transaction
     t.length = 8;             //Command is 8 bits
@@ -226,6 +231,7 @@ void adcWreg(uint8_t reg, uint8_t val)
     spiSend(0);
     spiSend(val);
 
+    //code below works upt to 4MHz SPI speed
     /*spi_transaction_t t;
     memset(&t, 0, sizeof(t));       //Zero out the transaction
     t.length=3*8;                   //Command is 3 x 8 bits
@@ -246,6 +252,7 @@ uint8_t adcRreg(uint8_t reg)
     return spiRec();
 
     //see pages 40,43 of datasheet -
+    //code below works upt to 4MHz SPI speed
     /*spi_transaction_t t;
     memset(&t, 0, sizeof(t));       //Zero out the transaction
     t.length=3*8;                   //Command is 3 x 8 bits
