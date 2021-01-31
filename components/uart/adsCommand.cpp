@@ -33,8 +33,12 @@ spi_device_handle_t spi;
 SemaphoreHandle_t xSemaphore = NULL;
 
 volatile bool is_rdatac = false;
+volatile bool is_rdata = false;
 volatile uint32_t current_sample = 0;
 volatile bool handling_data = false;
+TaskHandle_t rdatac_task_handle = NULL;
+TaskHandle_t read_task_handle = NULL;
+
 
 uint8_t tx_data_NOP[SPI_TRANSFER_SZ] = {0}; //NOPs for receiving data
 
@@ -42,19 +46,24 @@ static void IRAM_ATTR drdy_interrupt(void *arg)
 {
     static BaseType_t xHigherPriorityTaskWoken;
     xHigherPriorityTaskWoken = pdFALSE;
-    if (is_rdatac) //get ino ISR only in rdatac mode
+    if ((is_rdatac) | (is_rdata))//get ino ISR only in rdatac or rdata mode
     {
         //spi_data_available++;
-        current_sample++; //even if there is a collison count up
+        current_sample++; // increment even if there is a collison
         if (!handling_data) // means we have sent the last data
         {
-            xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken); //tell rdatac task to run
+            /*gpio_set_level(LED_PIN, 1);
+            ets_delay_us(1);   // signal on scope
+            gpio_set_level(LED_PIN, 0);*/
+            //xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken); //tell rdatac task to run
+            vTaskNotifyGiveFromISR(rdatac_task_handle, &xHigherPriorityTaskWoken);
+
             handling_data = true;
         }
         else
         {
             gpio_set_level(LED_PIN, 1);
-            ets_delay_us(2);   // signal collison on scope
+            //ets_delay_us(1);   // signal collison on scope
             gpio_set_level(LED_PIN, 0);
         }
     }
@@ -125,8 +134,8 @@ void spi_init() //probably need to re-init when transfering data at hign speed
 
     //startup p.62
     gpio_set_level(LED_PIN, 0); // LED off
-    //gpio_set_level(CLKSEL_PIN, 0); // use external clock
-    gpio_set_level(CLKSEL_PIN, 1); // use internal clock like hackeeg
+    gpio_set_level(CLKSEL_PIN, 0); // use external clock
+    //gpio_set_level(CLKSEL_PIN, 1); // use internal clock like hackeeg
     gpio_set_level(START_PIN, 1);  // start
 
     gpio_set_level(RESET_PIN, 1); // RESET H

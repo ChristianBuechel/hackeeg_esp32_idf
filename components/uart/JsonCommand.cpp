@@ -105,7 +105,7 @@ void JsonCommand::readSerial()
     while (length > 0)
     {
         uint8_t inChar;
-        length = uart_read_bytes(UART_NUM_0, &inChar, 1, 100); 
+        length = uart_read_bytes(UART_NUM_0, &inChar, 1, 100);
         uart_get_buffered_data_len(UART_NUM_0, (size_t *)&length);
         //char inChar = Serial.read();   // Read single available character, there may be more waiting
 
@@ -113,9 +113,9 @@ void JsonCommand::readSerial()
         { // Check for the terminator (default '\r') meaning end of command
             //DeserializationError error = deserializeJson(json_command, buffer);
             //printf("Buffer: %s\n", buffer);
-            ESP_LOGI(TAG, "Free Heap before parse %d",esp_get_free_heap_size());
+            ESP_LOGI(TAG, "Free Heap before parse %d", esp_get_free_heap_size());
             cj_root = cJSON_Parse(buffer);
-            ESP_LOGI(TAG, "Free Heap after parse %d",esp_get_free_heap_size());
+            ESP_LOGI(TAG, "Free Heap after parse %d", esp_get_free_heap_size());
 
             /*printf("cj_root.type %d\n",cj_root->type);
             printf("cj_root.string %s\n",cj_root->string);
@@ -127,14 +127,14 @@ void JsonCommand::readSerial()
             {
                 clearBuffer();
                 //sendJsonLinesResponse(400, (char *)"Bad Request");
-                sendJsonLinesResponse(RESPONSE_BAD_REQUEST, (char *)STATUS_TEXT_BAD_REQUEST);                
-                ESP_LOGI(TAG, "Free Heap bad request %d",esp_get_free_heap_size());
+                sendJsonLinesResponse(RESPONSE_BAD_REQUEST, (char *)STATUS_TEXT_BAD_REQUEST);
+                ESP_LOGI(TAG, "Free Heap bad request %d", esp_get_free_heap_size());
                 return;
             }
 
             //printf("vor temp\n");
-            cj_temp = cJSON_GetObjectItem(cj_root, COMMAND_KEY); 
-            ESP_LOGI(TAG, "Free Heap after cj_temp %d",esp_get_free_heap_size());
+            cj_temp = cJSON_GetObjectItem(cj_root, COMMAND_KEY);
+            ESP_LOGI(TAG, "Free Heap after cj_temp %d", esp_get_free_heap_size());
 
             //printf("nach temp\n");
             //char *command = (char *)malloc(100);
@@ -145,7 +145,7 @@ void JsonCommand::readSerial()
                 clearBuffer();
                 sendJsonLinesResponse(RESPONSE_UNRECOGNIZED_COMMAND, (char *)STATUS_TEXT_UNRECOGNIZED_COMMAND);
                 cJSON_Delete(cj_root);
-                ESP_LOGI(TAG, "Free Heap cmd NULL %d",esp_get_free_heap_size());//OK
+                ESP_LOGI(TAG, "Free Heap cmd NULL %d", esp_get_free_heap_size()); //OK
                 return;
             }
             //printf("command: %s\n", command);
@@ -154,10 +154,10 @@ void JsonCommand::readSerial()
             //if (command_name_variant.isNull())
             if (command[0] == '\0')
             {
-                (*defaultHandler)("");  
+                (*defaultHandler)("");
                 clearBuffer();
                 cJSON_Delete(cj_root);
-                ESP_LOGI(TAG, "Free Heap cmd 0 %d",esp_get_free_heap_size());
+                ESP_LOGI(TAG, "Free Heap cmd 0 %d", esp_get_free_heap_size());
                 return;
             }
             //const char *command = command_name_variant.as<const char *>();
@@ -167,19 +167,19 @@ void JsonCommand::readSerial()
                 (*defaultHandler)(command);
                 clearBuffer();
                 cJSON_Delete(cj_root);
-                ESP_LOGI(TAG, "Free Heap cmd num <0 %d",esp_get_free_heap_size());
+                ESP_LOGI(TAG, "Free Heap cmd num <0 %d", esp_get_free_heap_size());
                 return;
             }
 
             cj_array = cJSON_GetObjectItem(cj_root, PARAMETERS_KEY);
-            ESP_LOGI(TAG, "Free Heap after cj_array %d",esp_get_free_heap_size());
+            ESP_LOGI(TAG, "Free Heap after cj_array %d", esp_get_free_heap_size());
 
             int array_size = cJSON_GetArraySize(cj_array);
             //printf("array_size: %d\n", array_size);
             //JsonVariant parameters_variant = json_command.getMember(PARAMETERS_KEY);
 
-            unsigned char register_number = 0;
-            unsigned char register_value = 0;
+            int register_number = 0;
+            int register_value = 0;
 
             //if (!parameters_variant.isNull())
 
@@ -187,32 +187,37 @@ void JsonCommand::readSerial()
             {
                 register_number = cJSON_GetArrayItem(cj_array, 0)->valueint;
                 //perform range check here [0.255]
+                if (0x00 > register_number || register_number > 0xff)
+                {
+                    clearBuffer();
+                    sendJsonLinesResponse(RESPONSE_WRONG_REG, (char *)STATUS_TEXT_WRONG_REG);
+                    cJSON_Delete(cj_root);
+                    ESP_LOGI(TAG, "Free Heap cmd NULL %d", esp_get_free_heap_size()); //OK
+                    return;
+                }
                 ESP_LOGI(TAG, "register_number: %d", register_number);
                 if (array_size > 1)
                 {
                     //perform range check here [0.255]
                     register_value = cJSON_GetArrayItem(cj_array, 1)->valueint;
                     ESP_LOGI(TAG, "register_value: %d", register_value);
+                    if (0x00 > register_value || register_value > 0xff)
+                    {
+                        clearBuffer();
+                        sendJsonLinesResponse(RESPONSE_WRONG_REG_VALUE, (char *)STATUS_TEXT_WRONG_REG_VAL);
+                        cJSON_Delete(cj_root);
+                        ESP_LOGI(TAG, "Free Heap cmd NULL %d", esp_get_free_heap_size()); //OK
+                        return;
+                    }
                 }
-                /*
-                JsonArray params_array = parameters_variant.as<JsonArray>();
-                size_t number_of_params = params_array.size();
-                if (number_of_params > 0)
-                {
-                    register_number = params_array[0];
-                }
-                if (number_of_params > 1)
-                {
-                    register_value = params_array[1];
-                }*/
             }
-            ESP_LOGI(TAG, "Free Heap before del %d",esp_get_free_heap_size());
+            ESP_LOGI(TAG, "Free Heap before del %d", esp_get_free_heap_size());
             //cJSON_Delete(cj_array);
             //printf("Free Heap after del array %d \n",esp_get_free_heap_size());
             //cJSON_Delete(cj_temp);
             //printf("Free Heap after del temp %d \n",esp_get_free_heap_size());
             cJSON_Delete(cj_root);
-            ESP_LOGI(TAG, "Free Heap after del root %d",esp_get_free_heap_size());
+            ESP_LOGI(TAG, "Free Heap after del root %d", esp_get_free_heap_size());
             // Execute the stored handler function for the command
             (*commandList[command_num].command_function)(register_number, register_value);
             clearBuffer();
@@ -256,21 +261,20 @@ void JsonCommand::sendJsonLinesResponse(int status_code, char *status_text)
     doc.clear();*/
 
     cJSON *response;
-    ESP_LOGI(TAG, "Bad r before create %d",esp_get_free_heap_size());
+    ESP_LOGI(TAG, "Bad r before create %d", esp_get_free_heap_size());
     response = cJSON_CreateObject();
-    ESP_LOGI(TAG, "Bad r after create %d",esp_get_free_heap_size());
+    ESP_LOGI(TAG, "Bad r after create %d", esp_get_free_heap_size());
     cJSON_AddItemToObject(response, STATUS_CODE_KEY, cJSON_CreateNumber(status_code));
     cJSON_AddItemToObject(response, STATUS_TEXT_KEY, cJSON_CreateString(status_text));
-    ESP_LOGI(TAG, "Bad r after add %d",esp_get_free_heap_size());
-    
+    ESP_LOGI(TAG, "Bad r after add %d", esp_get_free_heap_size());
+
     //char* text = cJSON_Print(response);
-    char* text = cJSON_PrintUnformatted(response);
+    char *text = cJSON_PrintUnformatted(response);
     printf("%s\n", text);
     free(text);
 
     cJSON_Delete(response);
-    ESP_LOGI(TAG, "Bad r after delete %d",esp_get_free_heap_size());
-
+    ESP_LOGI(TAG, "Bad r after delete %d", esp_get_free_heap_size());
 }
 
 void JsonCommand::sendJsonLinesDocResponse(cJSON *doc)
@@ -278,17 +282,17 @@ void JsonCommand::sendJsonLinesDocResponse(cJSON *doc)
     /*serializeJson(doc, Serial);
     Serial.println();
     doc.clear();*/
-    ESP_LOGI(TAG, "sendJsonLinesDocResponse Free Heap before del %d",esp_get_free_heap_size());
-    
+    ESP_LOGI(TAG, "sendJsonLinesDocResponse Free Heap before del %d", esp_get_free_heap_size());
+
     //char* text = cJSON_Print(doc);
-    char* text = cJSON_PrintUnformatted(doc);
+    char *text = cJSON_PrintUnformatted(doc);
     printf("%s\n", text);
     //printf("and now directly to UART (%d bytes)\n",strlen(text));
     //uart_write(text, strlen(text));
     free(text);
 
     cJSON_Delete(doc);
-    ESP_LOGI(TAG, "sendJsonLinesDocResponse Free Heap after del %d",esp_get_free_heap_size());
+    ESP_LOGI(TAG, "sendJsonLinesDocResponse Free Heap after del %d", esp_get_free_heap_size());
 }
 
 /*void JsonCommand::sendMessagePackResponse(int status_code, char *status_text)

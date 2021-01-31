@@ -41,8 +41,11 @@ extern SemaphoreHandle_t xSemaphore;
 
 //extern volatile uint8_t spi_data_available;
 extern volatile bool is_rdatac;
+extern volatile bool is_rdata;
 extern volatile uint32_t current_sample;
 extern volatile bool handling_data;
+extern TaskHandle_t rdatac_task_handle;
+extern TaskHandle_t read_task_handle;
 
 
 void spi_init();

@@ -33,6 +33,8 @@ CB
 const char *STATUS_TEXT_OK = "Ok";
 const char *STATUS_TEXT_BAD_REQUEST = "Bad request";
 const char *STATUS_TEXT_UNRECOGNIZED_COMMAND = "Unrecognized command";
+const char *STATUS_TEXT_WRONG_REG = "Unrecognized register";
+const char *STATUS_TEXT_WRONG_REG_VAL = "Unrecognized register value";
 const char *STATUS_TEXT_ERROR = "Error";
 const char *STATUS_TEXT_NOT_IMPLEMENTED = "Not Implemented";
 const char *STATUS_TEXT_NO_ACTIVE_CHANNELS = "No Active Channels";
@@ -56,7 +58,7 @@ uint8_t messagepack_rdatac_header_size = sizeof(messagepack_rdatac_header);
 #define MP_HEADER_SZ 8
 #define MP_DATA_SZ 27
 #define MP_FULL_SZ 44 //8 + 4 + 4 + 1 + 27
-
+#define MP_PRE_SZ 17  //MP_HEADER_SZ + 4 + 4 +1
 
 union
 {
@@ -70,6 +72,13 @@ union
         uint32_t sample;           // sample #
         uint8_t data[MP_DATA_SZ];  // data ((8 ch + 1 status) x 3 bytes )
     } data_fields;
+
+    struct __attribute__((packed))
+    {
+        char preSPI[MP_PRE_SZ];
+        char postSPI[MP_DATA_SZ];
+    } pre_post;
+
 } mp_transfer;
 
 #define SPI_FULL_SZ 35 // MP_DATA_SZ + 4 + 4
@@ -80,9 +89,9 @@ union
 
     struct __attribute__((packed))
     {
-        uint32_t time;             // sample time
-        uint32_t sample;           // sample #
-        uint8_t data[MP_DATA_SZ];  // data ((8 ch + 1 status) x 3 bytes )
+        uint32_t time;            // sample time
+        uint32_t sample;          // sample #
+        uint8_t data[MP_DATA_SZ]; // data ((8 ch + 1 status) x 3 bytes )
     } data_fields;
 } spi_transfer;
 
@@ -110,7 +119,6 @@ uint8_t spi_bytes[SPI_BUFFER_SIZE];
 // char buffer to send via USB
 char output_buffer[OUTPUT_BUFFER_SIZE];
 char temp_buffer[OUTPUT_BUFFER_SIZE];
-
 
 SerialCommand serialCommand; // The  SerialCommand object
 JsonCommand jsonCommand;
@@ -223,7 +231,6 @@ void unrecognizedJsonLines(const char *command)
     cJSON_Delete(root);*/
     jsonCommand.sendJsonLinesDocResponse(root); //als Alternative
 }
-
 
 void adsSetup()
 { //default settings for ADS1298 and compatible chips
@@ -490,6 +497,23 @@ void rdatacCommand(unsigned char unused1, unsigned char unused2)
     }
 }
 
+void rdataCommand(unsigned char unused1, unsigned char unused2)
+{
+    using namespace ADS129x;
+    detectActiveChannels();
+    if (num_active_channels > 0)
+    {
+        send_response_ok();
+        handling_data = false; //fresh start
+        current_sample = 0;    //here or whe start commad is issued?
+        is_rdata = true;       //now ISR is armed ...
+    }
+    else
+    {
+        send_response(RESPONSE_NO_ACTIVE_CHANNELS, STATUS_TEXT_NO_ACTIVE_CHANNELS);
+    }
+}
+
 void sdatacCommand(unsigned char unused1, unsigned char unused2)
 {
     using namespace ADS129x;
@@ -499,7 +523,7 @@ void sdatacCommand(unsigned char unused1, unsigned char unused2)
     send_response_ok();
 }
 
-void rdataCommand(unsigned char unused1, unsigned char unused2)
+/*void rdataCommand(unsigned char unused1, unsigned char unused2) // TBD
 {
     using namespace ADS129x;
     while (gpio_get_level(DRDY_PIN) == 1)
@@ -512,7 +536,7 @@ void rdataCommand(unsigned char unused1, unsigned char unused2)
     //send_sample(); TBD --> not implemented ...
 
 }
-
+*/
 void readRegisterCommand(unsigned char unused1, unsigned char unused2)
 {
     using namespace ADS129x;
@@ -521,7 +545,8 @@ void readRegisterCommand(unsigned char unused1, unsigned char unused2)
     if (arg1 != NULL)
     {
         int registerNumber = hex_to_long(arg1);
-        if (registerNumber >= 0)
+        //if (registerNumber >= 0)
+        if (registerNumber >= 0x00 && registerNumber <= 0xff)
         {
             int result = adcRreg(registerNumber);
             printf("200 Ok (Read Register %#x)\n%#x\n", registerNumber, result);
@@ -574,36 +599,36 @@ void writeRegisterCommand(unsigned char unused1, unsigned char unused2)
 void readRegisterCommandDirect(unsigned char register_number, unsigned char unused1)
 {
     using namespace ADS129x;
-    if (register_number >= 0 and register_number <= 255)
+    /*   if (register_number >= 0 and register_number <= 255)
     // this needs to checked in JSON decoding !!!
     {
-        unsigned char result = adcRreg(register_number);
-
-        cJSON *root;
-        root = cJSON_CreateObject();
-        cJSON_AddItemToObject(root, STATUS_CODE_KEY, cJSON_CreateNumber(STATUS_OK));
-        cJSON_AddItemToObject(root, STATUS_TEXT_KEY, cJSON_CreateString(STATUS_TEXT_OK));
-        cJSON_AddItemToObject(root, DATA_KEY, cJSON_CreateNumber(result));
-        jsonCommand.sendJsonLinesDocResponse(root);
-    }
+     */
+    unsigned char result = adcRreg(register_number);
+    cJSON *root;
+    root = cJSON_CreateObject();
+    cJSON_AddItemToObject(root, STATUS_CODE_KEY, cJSON_CreateNumber(STATUS_OK));
+    cJSON_AddItemToObject(root, STATUS_TEXT_KEY, cJSON_CreateString(STATUS_TEXT_OK));
+    cJSON_AddItemToObject(root, DATA_KEY, cJSON_CreateNumber(result));
+    jsonCommand.sendJsonLinesDocResponse(root);
+    /* }
     else
     {
         send_response_error();
-    }
+    } */
 }
 
 void writeRegisterCommandDirect(unsigned char register_number, unsigned char register_value)
 {
-    if (register_number >= 0 && register_value >= 0)
+    /*    if (register_number >= 0 && register_value >= 0)
     // this needs to checked in JSON decoding !!!
-    {
-        adcWreg(register_number, register_value);
-        send_response_ok();
-    }
+    {  */
+    adcWreg(register_number, register_value);
+    send_response_ok();
+    /*}
     else
     {
         send_response_error();
-    }
+    }*/
 }
 
 void base64ModeOnCommand(unsigned char unused1, unsigned char unused2)
@@ -660,8 +685,19 @@ static void rdatac_task(void *arg)
     while (1)
     {
         // wait for ISR to wake us ...
-        if (xSemaphoreTake(xSemaphore, portMAX_DELAY) == pdTRUE)
+        //if (xSemaphoreTake(xSemaphore, portMAX_DELAY) == pdTRUE)
+        if (ulTaskNotifyTake(pdTRUE, portMAX_DELAY)) //saves 1us ;-)
         {
+            /*gpio_set_level(LED_PIN, 1);
+            ets_delay_us(1); // signal collison on scope
+            gpio_set_level(LED_PIN, 0);*/
+
+            if (is_rdata) //ask for data
+            {
+                using namespace ADS129x;
+                adcSendCommand(RDATA);
+                is_rdata = false; // just one conversion
+            }
             switch (protocol_mode)
             {
             case MESSAGEPACK_MODE:
@@ -669,8 +705,13 @@ static void rdatac_task(void *arg)
                 //this should be pretty fast
                 mp_transfer.data_fields.time = esp_timer_get_time(); //cave 64bit
                 mp_transfer.data_fields.sample = current_sample;
+                //now transmit the first chunk
+                uart_write(mp_transfer.pre_post.preSPI, MP_PRE_SZ);
                 spiRec(mp_transfer.data_fields.data, MP_DATA_SZ);
-                uart_write(mp_transfer.bytes, MP_FULL_SZ);
+                //...and second chunk
+                uart_write(mp_transfer.pre_post.postSPI, MP_DATA_SZ);
+
+                //uart_write(mp_transfer.bytes, MP_FULL_SZ); //the whole lot
                 /*gpio_set_level(LED_PIN, 1);
             ets_delay_us(2); //wait 2us
             gpio_set_level(LED_PIN, 0);*/
@@ -692,7 +733,7 @@ static void rdatac_task(void *arg)
 
                 memcpy(&output_buffer[count], temp_buffer, b64len);
                 count += b64len;
-                
+
                 memcpy(&output_buffer[count], json_rdatac_footer, json_rdatac_footer_size);
                 count += json_rdatac_footer_size;
                 //memcpy(&output_buffer[count], json_rdatac_footer, 2);
@@ -728,6 +769,27 @@ static void rdatac_task(void *arg)
     }
 }
 
+static void read_task(void *arg) //task checking the UART for commands
+{
+    while (1)
+    {
+        switch (protocol_mode)
+        {
+        case TEXT_MODE:
+            serialCommand.readSerial();
+            break;
+        case JSONLINES_MODE:
+        case MESSAGEPACK_MODE:
+            jsonCommand.readSerial();
+            break;
+        default:
+            // do nothing
+            ;
+        }
+        vTaskDelay(10 / portTICK_PERIOD_MS); //UART input gets handled every 10 ms ...
+    }
+}
+
 void app_main(void)
 {
 
@@ -744,15 +806,14 @@ Default log verbosity
     ESP_LOGI(TAG, "Hi");
     uart_init();
     protocol_mode = TEXT_MODE;
-    //protocol_mode = JSONLINES_MODE;
     ESP_LOGI(TAG, "UART initialized");
     spi_init(); //start SPI, define semaphore, do GPIO stuff
     ESP_LOGI(TAG, "SPI initialized");
     adsSetup();
     ESP_LOGI(TAG, "ADS1299 initialized");
 
-    xSemaphore = xSemaphoreCreateBinary();
-    xTaskCreate(rdatac_task, "rdatac_task", 4096, NULL, 5, NULL); //params?? prio 2 ??
+    xSemaphore = xSemaphoreCreateBinary();                                                      //not neede anymore
+    xTaskCreatePinnedToCore(rdatac_task, "rdatac_task", 4096, NULL, 5, &rdatac_task_handle, 0); //params?? prio 2 ??
 
     serialCommand.setDefaultHandler(unrecognized);                 //
     serialCommand.addCommand("nop", nopCommand);                   // No operation (does nothing)
@@ -808,7 +869,8 @@ Default log verbosity
     jsonCommand.addCommand("wreg", writeRegisterCommandDirect);  // Write ADS129x register, arguments in hex
     jsonCommand.addCommand("help", helpCommand);                 // Print list of commands
     jsonCommand.clearBuffer();
-    while (1) //main loop
+    xTaskCreatePinnedToCore(read_task, "read_task", 4096, NULL, 1, &read_task_handle, 1); //params?? prio 2 ??
+    /*while (1) //main loop
     {
         switch (protocol_mode)
         {
@@ -824,5 +886,5 @@ Default log verbosity
             ;
         }
         vTaskDelay(10 / portTICK_PERIOD_MS); //UART input gets handled every 10 ms ...
-    }
+    }*/
 }

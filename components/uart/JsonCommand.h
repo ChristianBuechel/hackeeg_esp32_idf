@@ -37,6 +37,8 @@
 #define RESPONSE_OK 200
 #define RESPONSE_BAD_REQUEST 400
 #define RESPONSE_UNRECOGNIZED_COMMAND 406
+#define RESPONSE_WRONG_REG 407
+#define RESPONSE_WRONG_REG_VALUE 408
 #define RESPONSE_ERROR 500
 #define RESPONSE_NOT_IMPLEMENTED 501
 #define RESPONSE_NO_ACTIVE_CHANNELS 502
@@ -59,6 +61,8 @@ extern const char *MP_DATA_KEY;
 extern const char *STATUS_TEXT_OK;
 extern const char *STATUS_TEXT_BAD_REQUEST;
 extern const char *STATUS_TEXT_UNRECOGNIZED_COMMAND;
+extern const char *STATUS_TEXT_WRONG_REG;
+extern const char *STATUS_TEXT_WRONG_REG_VAL;
 extern const char *STATUS_TEXT_ERROR;
 extern const char *STATUS_TEXT_NOT_IMPLEMENTED;
 extern const char *STATUS_TEXT_NO_ACTIVE_CHANNELS;
@@ -89,7 +93,7 @@ private:
         char command[JSONCOMMAND_MAXCOMMANDLENGTH + 1];
         command_func command_function;
     };                                    // Data structure to hold Command/Handler function key-value pairs
-    JsonCommandCallback *commandList;   // Actual definition for command/handler array
+    JsonCommandCallback *commandList;     // Actual definition for command/handler array
     uint8_t commandCount;
 
     // Pointer to the default handler function
@@ -99,8 +103,8 @@ private:
     char term;     // Character that signals end of command (default '\n')
 
     char buffer[JSONCOMMAND_BUFFER + 1]; // Buffer of stored characters while waiting for terminator character
-    uint8_t bufPos;                        // Current position in the buffer
-    char *last;                         // State variable used by strtok_r during processing
+    uint8_t bufPos;                      // Current position in the buffer
+    char *last;                          // State variable used by strtok_r during processing
 
     int findCommand(const char *command);
 };
